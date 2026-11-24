@@ -1,0 +1,72 @@
+@import "tailwindcss";
+
+/*
+ * Единые правила оформления. Значения задаются из config/company.ts
+ * (см. app/layout.tsx → themeStyle), здесь — только связи токенов.
+ */
+@theme inline {
+  --color-background: var(--am-background);
+  --color-surface: var(--am-surface);
+  --color-foreground: var(--am-text);
+  --color-muted-foreground: var(--am-muted-text);
+  --color-muted: var(--am-muted);
+  --color-border: var(--am-border);
+  --color-input: var(--am-border);
+  --color-primary: var(--am-accent);
+  --color-primary-foreground: var(--am-accent-foreground);
+  --color-selected: var(--am-selected);
+  --color-ring: var(--am-accent);
+  --color-destructive: var(--am-danger);
+  --color-success: var(--am-success);
+  --color-warning: var(--am-warning);
+  --radius-lg: var(--am-radius);
+  --radius-md: calc(var(--am-radius) - 2px);
+  --radius-sm: calc(var(--am-radius) - 4px);
+  --font-sans: var(--am-font);
+}
+
+:root {
+  --am-background: #f7f7f8;
+  --am-surface: #ffffff;
+  --am-text: #18181b;
+  --am-muted-text: #5b5b66;
+  --am-muted: #f0f0f2;
+  --am-border: #e4e4e7;
+  --am-accent: #2563eb;
+  --am-accent-foreground: #ffffff;
+  --am-selected: color-mix(in srgb, var(--am-accent) 10%, white);
+  --am-danger: #c62828;
+  --am-success: #1f7a3d;
+  --am-warning: #a15c00;
+  --am-radius: 0.625rem;
+  --am-font: ui-sans-serif, system-ui, sans-serif;
+  color-scheme: light;
+}
+
+html,
+body {
+  background: var(--am-background);
+  color: var(--am-text);
+  font-family: var(--am-font);
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Видимый фокус для клавиатуры на всех интерактивных элементах. */
+:focus-visible {
+  outline: 2px solid var(--am-accent);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom);
+}
