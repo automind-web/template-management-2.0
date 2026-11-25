@@ -188,4 +188,12 @@ assert.equal(r.status, 200);
 r = await manager("GET", "/api/me");
 assert.equal(r.status, 401);
 
+// Данные для следующих проверок (scripts/smoke-tasks.mjs). Только тестовая БД.
+const { mkdirSync, writeFileSync } = await import("node:fs");
+mkdirSync(".wrangler", { recursive: true });
+writeFileSync(
+  ".wrangler/smoke-state.json",
+  JSON.stringify({ base: BASE, suffix, director: { login: `dir-${suffix}`, password: "director-pass-1" }, manager2: { login: `mgr2-${suffix}`, password: "manager-pass-2" }, b1, b2 }),
+);
+
 console.log("\n✓ Этап 1: все сценарии пройдены");

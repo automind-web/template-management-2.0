@@ -216,6 +216,8 @@ export const tasks = sqliteTable(
     completedAt: integer("completed_at"),
     cancelledAt: integer("cancelled_at"),
     reopenCount: integer("reopen_count").notNull().default(0),
+    /** Текст для поиска в нижнем регистре (SQLite lower() не понимает кириллицу). */
+    searchText: text("search_text").notNull().default(""),
     createdAt: integer("created_at").notNull().default(now),
     updatedAt: integer("updated_at").notNull().default(now),
   },

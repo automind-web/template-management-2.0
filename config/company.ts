@@ -78,6 +78,10 @@ export const companyConfig = {
     acceptanceEnabled: true,
     /** Скорость считается от начала работы (started) или от назначения (assigned). */
     speedFrom: "started" as "started" | "assigned",
+    /** Для новой задачи по умолчанию обязателен текст результата при сдаче. */
+    defaultRequiresResult: true,
+    /** Для новой задачи по умолчанию обязательно вложение при сдаче. */
+    defaultRequiresAttachment: false,
   },
 
   /** Статусы по умолчанию. Ключи не меняются, названия — можно. */
@@ -88,7 +92,12 @@ export const companyConfig = {
     { key: "done", name: "Завершена", category: "done" },
   ] satisfies StatusConfig[],
 
-  /** Разрешённые переходы. Для отключённой приёмки см. transitionsWithoutAcceptance. */
+  /**
+   * Разрешённые переходы. Для отключённой приёмки см. transitionsWithoutAcceptance.
+   * requires.result — переход сдаёт результат: открывается форма результата; текст и вложение
+   * обязательны по правилам задачи (requiresResult / requiresAttachment).
+   * requires.comment — обязателен комментарий (например, причина возврата).
+   */
   transitions: [
     { from: "new", to: "in_progress", actors: ["assignee", "manager", "director"] },
     { from: "in_progress", to: "review", actors: ["assignee"], requires: { result: true } },
@@ -107,6 +116,11 @@ export const companyConfig = {
 
   /** Дополнительные поля задачи (хранятся в extra_json). */
   extraFields: [] as { key: string; label: string; type: "text" | "number" | "date" }[],
+
+  files: {
+    /** Максимальный размер одного вложения, байт. */
+    maxSize: 20 * 1024 * 1024,
+  },
 
   notifications: {
     /** За сколько часов до срока напоминать по умолчанию. */

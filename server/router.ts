@@ -10,6 +10,8 @@ import * as invites from "./ops/invites";
 import * as org from "./ops/org";
 import * as setup from "./ops/setup";
 import * as system from "./ops/system";
+import * as tasks from "./ops/tasks";
+import { resolveBranch } from "./permissions";
 import { sessionTtlMs } from "./session";
 import { z } from "zod";
 
@@ -164,6 +166,80 @@ route("POST", "/api/members/:userId/reset-code", async ({ request, params }) =>
 
 route("GET", "/api/system/status", async ({ request }) => json(await system.systemStatus(await requireActor(request))));
 
+// ---------- Задачи ----------
+
+/** После изменения возвращается актуальная карточка: фактический статус и следующее действие. */
+const cardAfter = async (request: Request, r: { taskId: string; replayed?: boolean }) => {
+  const actor = await requireActor(request);
+  return json({ ...(await tasks.getTaskCard(actor, r.taskId)), replayed: Boolean(r.replayed) });
+};
+
+route("GET", "/api/tasks", async ({ request, url }) =>
+  json(await tasks.listTasks(await requireActor(request), tasks.parseListQuery(url))),
+);
+
+route("POST", "/api/tasks", async ({ request }) => {
+  const actor = await requireActor(request);
+  const r = await tasks.createTask(actor, await readJson(request, tasks.createTaskSchema));
+  const card = await tasks.getTaskCard(actor, r.taskId);
+  return json({ ...card, replayed: Boolean(r.replayed) }, { status: r.replayed ? 200 : 201 });
+});
+
+route("GET", "/api/tasks/assignees", async ({ request, url }) => {
+  const actor = await requireActor(request);
+  const branch = url.searchParams.get("branch");
+  return json({ assignees: await tasks.searchAssignees(actor, resolveBranch(actor, branch), url.searchParams.get("q") ?? "") });
+});
+
+route("GET", "/api/tasks/:id", async ({ request, params }) => json(await tasks.getTaskCard(await requireActor(request), params.id!)));
+
+route("PATCH", "/api/tasks/:id", async ({ request, params }) => {
+  const actor = await requireActor(request);
+  return cardAfter(request, await tasks.updateTask(actor, params.id!, await readJson(request, tasks.updateTaskSchema)));
+});
+
+route("POST", "/api/tasks/:id/status", async ({ request, params }) => {
+  const actor = await requireActor(request);
+  return cardAfter(request, await tasks.changeStatus(actor, params.id!, await readJson(request, tasks.changeStatusSchema)));
+});
+
+route("POST", "/api/tasks/:id/cancel", async ({ request, params }) => {
+  const actor = await requireActor(request);
+  return cardAfter(request, await tasks.setCancelled(actor, params.id!, true, await readJson(request, tasks.cancelSchema)));
+});
+
+route("POST", "/api/tasks/:id/restore", async ({ request, params }) => {
+  const actor = await requireActor(request);
+  return cardAfter(request, await tasks.setCancelled(actor, params.id!, false, await readJson(request, tasks.cancelSchema)));
+});
+
+route("POST", "/api/tasks/:id/comments", async ({ request, params }) => {
+  const actor = await requireActor(request);
+  return cardAfter(request, await tasks.addComment(actor, params.id!, await readJson(request, tasks.commentSchema)));
+});
+
+route("POST", "/api/tasks/:id/attachments", async ({ request, params }) => {
+  const actor = await requireActor(request);
+  let form: FormData;
+  try {
+    form = await request.formData();
+  } catch {
+    throw new AppError("bad_form", 400);
+  }
+  const file = form.get("file");
+  if (!(file instanceof File)) throw new AppError("file_empty", 400);
+  await tasks.uploadAttachment(actor, params.id!, file, String(form.get("kind") ?? "file"));
+  return cardAfter(request, { taskId: params.id! });
+});
+
+route("GET", "/api/attachments/:id", async ({ request, params }) =>
+  tasks.downloadAttachment(await requireActor(request), params.id!),
+);
+
+route("DELETE", "/api/attachments/:id", async ({ request, params }) =>
+  json(await tasks.deleteAttachment(await requireActor(request), params.id!)),
+);
+
 // ---------- Диспетчер ----------
 
 export async function dispatch(request: Request): Promise<Response> {
@@ -187,6 +263,17 @@ export async function dispatch(request: Request): Promise<Response> {
     if (methodMismatch) throw new AppError("method_not_allowed", 405);
     throw notFound();
   } catch (error) {
+    if (error instanceof AppError && error.code === "version_conflict") {
+      const m = /^\/api\/tasks\/([^/]+)/.exec(url.pathname);
+      if (m) {
+        try {
+          const current = await tasks.getTaskCard(await requireActor(request), decodeURIComponent(m[1]!));
+          return json({ error: { code: error.code, details: { current } } }, { status: 409 });
+        } catch {
+          /* нет доступа — обычный ответ об ошибке */
+        }
+      }
+    }
     const response = errorResponse(error);
     // Сессия недействительна или доступ отозван — cookie сбрасывается.
     if (error instanceof AppError && (error.code === "unauthorized" || error.code === "access_revoked")) {
