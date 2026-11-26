@@ -3,18 +3,22 @@ import { cn } from "@/lib/utils";
 
 export function Card({ className, ...props }: React.ComponentProps<"div">) {
   return (
-    <div data-slot="card" className={cn("rounded-lg border border-border bg-surface shadow-[0_1px_2px_rgba(16,24,40,0.04)]", className)} {...props} />
+    <div data-slot="card" className={cn("rounded-xl border border-border bg-surface shadow-[0_1px_3px_rgba(16,24,40,0.05)]", className)} {...props} />
   );
 }
 
 /** Карточка-раздел с заголовком (профиль, настройки, уведомления). */
 export function Section({
   title,
+  description,
+  icon,
   actions,
   className,
   children,
 }: {
   title?: React.ReactNode;
+  description?: React.ReactNode;
+  icon?: React.ReactNode;
   actions?: React.ReactNode;
   className?: string;
   children: React.ReactNode;
@@ -22,8 +26,14 @@ export function Section({
   return (
     <Card className={cn("p-4 sm:p-5", className)}>
       {title || actions ? (
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          {title ? <h2 className="text-lg font-semibold">{title}</h2> : <span />}
+        <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+          <div className="flex min-w-0 items-start gap-3">
+            {icon ? <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-selected text-primary">{icon}</span> : null}
+            <div className="min-w-0">
+              {title ? <h2 className="text-lg font-bold">{title}</h2> : null}
+              {description ? <p className="mt-0.5 text-sm text-muted-foreground">{description}</p> : null}
+            </div>
+          </div>
           {actions}
         </div>
       ) : null}

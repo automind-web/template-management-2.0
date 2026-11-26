@@ -11,11 +11,10 @@ import { modelAvailable } from "../assistant/engine";
 import { loadActorForUser } from "../context";
 import { timingSafeEqual } from "../crypto";
 import { getDb, schema } from "../db";
-import { getEnv } from "../env";
 import { AppError } from "../errors";
 import { rememberedOrigin } from "../notify/queue";
 import { confirmLinkCode, userByPhone } from "./link";
-import { mediaUrl, normalizePhone, sendWhatsAppText, webhookKey } from "./whapi";
+import { mediaUrl, normalizePhone, sendWhatsAppText, webhookKey, whapiToken } from "./whapi";
 
 type WhapiMessage = {
   id: string;
@@ -34,8 +33,8 @@ async function alreadyHandled(externalId: string): Promise<boolean> {
 }
 
 async function downloadVoice(media: NonNullable<WhapiMessage["voice"]>): Promise<File | null> {
-  const token = getEnv().WHAPI_TOKEN?.trim();
-  const url = media.link ?? (media.id ? mediaUrl(media.id) : null);
+  const token = await whapiToken();
+  const url = media.link ?? (media.id ? await mediaUrl(media.id) : null);
   if (!url || !token) return null;
   const res = await fetch(url, { headers: { authorization: `Bearer ${token}` } });
   if (!res.ok) return null;
@@ -68,8 +67,8 @@ async function handle(msg: WhapiMessage): Promise<void> {
   let body = text;
   const media = msg.voice ?? msg.audio;
   if (!body && media) {
-    if (!modelAvailable()) {
-      await sendWhatsAppText(phone, "Голосовые сообщения доступны, когда задан ключ модели. Напишите текстом.");
+    if (!(await modelAvailable())) {
+      await sendWhatsAppText(phone, "Голосовые сообщения пока не поддерживаются. Напишите, пожалуйста, текстом.");
       return;
     }
     const file = await downloadVoice(media);

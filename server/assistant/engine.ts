@@ -2,7 +2,7 @@
  * Разбор сообщения помощнику. Порядок:
  * 1) ожидающее подтверждение или выбор карточки (детерминированно, без модели);
  * 2) явные команды («мои задачи», «сдать #12: …», «создай …»);
- * 3) если задан OPENAI_API_KEY — модель GPT с теми же действиями; иначе — подсказка по командам.
+ * 3) если директор указал ключ OpenAI — модель GPT с теми же действиями; иначе — подсказка по командам.
  * Удаление и массовые изменения выполняются только после «да».
  */
 import type { Actor } from "../context";
@@ -11,7 +11,7 @@ import { errorMessage } from "./errors";
 import * as act from "./actions";
 import { parseDate, parseRelative, todayIn, wordRegExp as w } from "./dates";
 import { runModel } from "./llm";
-import { getEnv } from "../env";
+import { getSecret } from "../integrations";
 import { dueMomentInZone } from "../time";
 
 type Action =
@@ -30,8 +30,9 @@ export type Pending =
 export type AssistantState = { pending?: Pending };
 export type AssistantReply = act.Result & { state: AssistantState; mode: "commands" | "model" };
 
-export function modelAvailable(): boolean {
-  return Boolean(getEnv().OPENAI_API_KEY?.trim());
+/** Умный режим доступен, когда директор указал ключ OpenAI в настройках. */
+export async function modelAvailable(): Promise<boolean> {
+  return Boolean(await getSecret("openai"));
 }
 
 export const HELP = [
@@ -243,7 +244,7 @@ export async function handleMessage(actor: Actor, text: string, state: Assistant
     }
     const byCommand = await commands(actor, text, {});
     if (byCommand) return byCommand;
-    if (modelAvailable()) {
+    if (await modelAvailable()) {
       const r = await runModel(actor, text, history);
       return { ...r.result, state: r.pending ? { pending: r.pending } : {}, mode: "model" };
     }

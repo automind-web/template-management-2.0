@@ -13,7 +13,7 @@ import * as setup from "./ops/setup";
 import * as system from "./ops/system";
 import * as notify from "./notify/queue";
 import { loadPrefs, prefsSchema, savePrefs } from "./notify/prefs";
-import { getEnv } from "./env";
+import { pushKeys } from "./integrations";
 import { whapiConfigured } from "./whatsapp/whapi";
 import { getDb, schema } from "./db";
 import { newId } from "./crypto";
@@ -23,6 +23,7 @@ import * as whatsappLink from "./whatsapp/link";
 import * as stats from "./ops/stats";
 import * as tasks from "./ops/tasks";
 import { resolveBranch } from "./permissions";
+import { loadPublicBranding } from "./settings";
 import { sessionTtlMs } from "./session";
 import { z } from "zod";
 
@@ -52,6 +53,12 @@ const loginCookie = (request: Request, token: string) =>
 // ---------- Служебное ----------
 
 route("GET", "/api/health", async () => json(await system.health()));
+
+/** Название и логотип для страниц входа (без данных пользователей). */
+route("GET", "/api/branding", async () => {
+  const b = await loadPublicBranding();
+  return json({ name: b.name, logoUrl: b.logoUrl });
+});
 
 // ---------- Первый запуск ----------
 
@@ -161,16 +168,27 @@ route("PATCH", "/api/settings/company", async ({ request }) => {
   return json(await org.updateCompany(actor, await readJson(request, org.updateCompanySchema)));
 });
 
-route("PATCH", "/api/settings/process", async ({ request }) => {
+route("POST", "/api/settings/logo", async ({ request }) => {
   const actor = await requireActor(request);
-  return json(await org.updateProcess(actor, await readJson(request, org.updateProcessSchema)));
+  let form: FormData;
+  try {
+    form = await request.formData();
+  } catch {
+    throw new AppError("bad_form", 400);
+  }
+  const file = form.get("file");
+  return json(await org.uploadLogo(actor, file instanceof File ? file : null));
 });
 
-route("GET", "/api/settings/connections", async ({ request }) => json(await org.connections(await requireActor(request), publicOrigin(request))));
+route("DELETE", "/api/settings/logo", async ({ request }) => json(await org.uploadLogo(await requireActor(request), null)));
 
-route("PATCH", "/api/settings/whatsapp", async ({ request }) => {
+route("GET", "/api/branding/logo", async () => org.logoResponse());
+
+route("GET", "/api/settings/assistant", async ({ request }) => json(await org.getAssistantSettings(await requireActor(request))));
+
+route("PATCH", "/api/settings/assistant", async ({ request }) => {
   const actor = await requireActor(request);
-  return json(await org.updateWhatsappSettings(actor, await readJson(request, org.whatsappSettingsSchema)));
+  return json(await org.updateAssistantSettings(actor, await readJson(request, org.updateAssistantSchema), publicOrigin(request)));
 });
 
 route("GET", "/api/branches", async ({ request }) => json({ branches: await org.listBranches(await requireActor(request)) }));
@@ -282,14 +300,14 @@ route("DELETE", "/api/attachments/:id", async ({ request, params }) =>
 
 route("GET", "/api/notifications", async ({ request }) => {
   const actor = await requireActor(request);
-  const env = getEnv();
+  const push = await pushKeys();
   return json({
     ...(await notify.inbox(actor)),
     prefs: await loadPrefs(actor.user.id),
     workDays: actor.settings.workDays,
     channels: {
-      whatsapp: { linked: Boolean(actor.user.phoneVerifiedAt), configured: whapiConfigured() },
-      push: { configured: Boolean(env.VAPID_PUBLIC_KEY && env.VAPID_PRIVATE_KEY), vapidPublicKey: env.VAPID_PUBLIC_KEY ?? null },
+      whatsapp: { linked: Boolean(actor.user.phoneVerifiedAt), configured: await whapiConfigured() },
+      push: { configured: Boolean(push), vapidPublicKey: push?.publicKey ?? null },
     },
   });
 });

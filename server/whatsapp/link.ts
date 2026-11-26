@@ -18,7 +18,7 @@ function sixDigits(): string {
 }
 
 export async function issueLinkCode(actor: Actor) {
-  if (!whapiConfigured()) throw new AppError("whatsapp_unavailable", 503);
+  if (!(await whapiConfigured())) throw new AppError("whatsapp_unavailable", 503);
   const db = getDb();
   const now = Date.now();
   await db

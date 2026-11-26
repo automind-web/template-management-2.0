@@ -1,32 +1,34 @@
 "use client";
 
-import { Tabs } from "radix-ui";
+import { Building2, Bot, Store, Users } from "lucide-react";
 import * as React from "react";
 import { useCabinet } from "@/components/cabinet/cabinet-context";
 import { PageBody, PageHeader } from "@/components/cabinet/page-header";
+import { AssistantTab } from "@/components/settings/assistant-tab";
 import { BranchesTab } from "@/components/settings/branches-tab";
 import { CompanyTab } from "@/components/settings/company-tab";
-import { ConnectionsTab } from "@/components/settings/connections-tab";
-import { InvitesTab } from "@/components/settings/invites-tab";
-import { MembersTab } from "@/components/settings/members-tab";
-import { ProcessTab } from "@/components/settings/process-tab";
+import { TeamTab } from "@/components/settings/team-tab";
 import { Alert } from "@/components/ui/card";
 import { errorText, t } from "@/lib/i18n";
+import { cn } from "@/lib/utils";
 
-/** Директор: компания, процесс, филиалы, участники, приглашения, подключения. Руководитель: участники и приглашения филиала. */
+const TABS = [
+  { key: "company", icon: Building2 },
+  { key: "branches", icon: Store },
+  { key: "team", icon: Users },
+  { key: "assistant", icon: Bot },
+] as const;
+
+/** Директор: компания, филиалы, сотрудники, WhatsApp и помощник. Руководитель: сотрудники своего филиала. */
 export default function SettingsPage() {
   const { me } = useCabinet();
-  const director = me.capabilities.manageCompany;
-  const tabs = director
-    ? (["company", "process", "branches", "members", "invites", "connections"] as const)
-    : me.capabilities.inviteEmployees
-      ? (["members", "invites"] as const)
-      : (["members"] as const);
-  const [tab, setTab] = React.useState<string>(tabs[0]);
+  const director = me.capabilities.viewSystemSettings;
+  const tabs = director ? TABS : TABS.filter((tab) => tab.key === "team");
+  const [tab, setTab] = React.useState<string>(tabs[0]!.key);
 
   React.useEffect(() => {
     const fromUrl = new URLSearchParams(window.location.search).get("tab");
-    if (fromUrl && (tabs as readonly string[]).includes(fromUrl)) setTab(fromUrl);
+    if (fromUrl && tabs.some((x) => x.key === fromUrl)) setTab(fromUrl);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -35,7 +37,7 @@ export default function SettingsPage() {
     window.history.replaceState(window.history.state, "", `${window.location.pathname}?tab=${value}`);
   };
 
-  if (!me.capabilities.viewSystemSettings) {
+  if (!me.capabilities.manageTeam) {
     return (
       <>
         <PageHeader title={t("settings.title")} />
@@ -48,43 +50,31 @@ export default function SettingsPage() {
 
   return (
     <>
-      <PageHeader title={t("settings.title")} />
-      <PageBody className="max-w-6xl">
-        <Tabs.Root value={tab} onValueChange={select}>
-          <Tabs.List className="mb-5 flex gap-1 overflow-x-auto border-b border-border" aria-label={t("settings.title")}>
-            {tabs.map((key) => (
-              <Tabs.Trigger
+      <PageHeader title={director ? t("settings.title") : t("nav.team")} subtitle={director ? t("settings.subtitle") : t("team.subtitle")} />
+      <PageBody className="flex max-w-5xl flex-col gap-5">
+        {tabs.length > 1 ? (
+          <div role="tablist" aria-label={t("settings.title")} className="grid grid-cols-4 gap-1 rounded-2xl bg-muted/80 p-1">
+            {tabs.map(({ key, icon: Icon }) => (
+              <button
                 key={key}
-                value={key}
-                className="-mb-px whitespace-nowrap border-b-2 border-transparent px-4 py-2.5 text-[15px] font-semibold text-foreground/60 hover:text-foreground data-[state=active]:border-primary data-[state=active]:text-foreground"
+                type="button"
+                role="tab"
+                aria-selected={tab === key}
+                onClick={() => select(key)}
+                className={cn(
+                  "flex min-w-0 flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 text-xs font-semibold transition-all sm:flex-row sm:gap-2 sm:px-4 sm:py-2.5 sm:text-[15px]",
+                  tab === key ? "bg-surface text-foreground shadow-sm" : "text-foreground/60 hover:text-foreground",
+                )}
               >
-                {t(`settings.tabs.${key}`)}
-              </Tabs.Trigger>
+                <Icon className="size-[18px]" />
+                <span className="max-w-full truncate">{t(`settings.tabs.${key}`)}</span>
+              </button>
             ))}
-          </Tabs.List>
-          {director ? (
-            <>
-              <Tabs.Content value="company">
-                <CompanyTab />
-              </Tabs.Content>
-              <Tabs.Content value="process">
-                <ProcessTab />
-              </Tabs.Content>
-              <Tabs.Content value="branches">
-                <BranchesTab />
-              </Tabs.Content>
-              <Tabs.Content value="connections">
-                <ConnectionsTab />
-              </Tabs.Content>
-            </>
-          ) : null}
-          <Tabs.Content value="members">
-            <MembersTab />
-          </Tabs.Content>
-          <Tabs.Content value="invites">
-            <InvitesTab />
-          </Tabs.Content>
-        </Tabs.Root>
+          </div>
+        ) : null}
+        <div role="tabpanel" key={tab} className="am-fade-up">
+          {tab === "company" ? <CompanyTab /> : tab === "branches" ? <BranchesTab /> : tab === "assistant" ? <AssistantTab /> : <TeamTab />}
+        </div>
       </PageBody>
     </>
   );

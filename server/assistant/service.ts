@@ -38,8 +38,8 @@ export async function getChat(actor: Actor) {
     .limit(60);
   return {
     name: actor.settings.assistantName,
-    mode: modelAvailable() ? "model" : "commands",
-    voice: modelAvailable(),
+    mode: (await modelAvailable()) ? "model" : "commands",
+    voice: await modelAvailable(),
     help: HELP,
     messages: rows.reverse().filter((m) => m.role === "user" || m.role === "assistant").map(toView),
   };
@@ -92,7 +92,7 @@ export async function sendWebMessage(actor: Actor, text: string, opId?: string) 
 const MAX_AUDIO = 10 * 1024 * 1024;
 
 export async function sendVoice(actor: Actor, audio: File, channel: Channel = "web") {
-  if (!modelAvailable()) throw new AppError("voice_unavailable", 503);
+  if (!(await modelAvailable())) throw new AppError("voice_unavailable", 503);
   if (audio.size === 0) throw new AppError("file_empty", 400);
   if (audio.size > MAX_AUDIO) throw new AppError("file_too_large", 413);
   const text = await transcribe(audio, companyConfig.assistant.transcribeModel).catch(() => {

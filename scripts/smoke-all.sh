@@ -7,10 +7,10 @@ MOCK_PORT="${WHAPI_MOCK_PORT:-5199}"
 pkill -f "vite --port ${PORT}" 2>/dev/null || true
 sleep 1
 
-# Тестовые значения: код владельца и заглушка Whapi. Свой .dev.vars сохраняется и возвращается.
+# Тестовые значения: код активации и адрес заглушки Whapi (ключ вводится через настройки в smoke-whatsapp). Свой .dev.vars сохраняется и возвращается.
 [ -f .dev.vars ] && cp .dev.vars .wrangler/dev.vars.backup
 mkdir -p .wrangler
-printf 'OWNER_ACTIVATION_CODE=local-dev-code-123\nWHAPI_TOKEN=test-token\nWHAPI_API_URL=http://127.0.0.1:%s\n' "${MOCK_PORT}" > .dev.vars
+printf 'OWNER_ACTIVATION_CODE=local-dev-code-123\nWHAPI_API_URL=http://127.0.0.1:%s\n' "${MOCK_PORT}" > .dev.vars
 
 npm run db:reset:local >/dev/null
 npx vite --port "${PORT}" > .wrangler/smoke-dev.log 2>&1 &

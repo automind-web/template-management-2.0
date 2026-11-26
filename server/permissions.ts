@@ -103,7 +103,9 @@ export function capabilities(actor: Actor) {
     inviteManagers: director,
     inviteEmployees: director || managerMayInvite(actor),
     viewStats: director || manager,
-    viewSystemSettings: director || manager,
+    /** «Настройки системы» — только директор; руководитель видит раздел «Сотрудники» своего филиала. */
+    viewSystemSettings: director,
+    manageTeam: director || manager,
     switchBranch: director,
     assignOthers: director || manager,
     acceptResults: director || manager,

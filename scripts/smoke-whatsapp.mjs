@@ -1,5 +1,5 @@
 // Сквозная проверка WhatsApp на заглушке Whapi (без реального номера).
-// Запускается из scripts/smoke-all.sh: dev-сервер получает WHAPI_TOKEN=test и WHAPI_API_URL заглушки.
+// Запускается из scripts/smoke-all.sh: dev-сервер получает WHAPI_API_URL заглушки, ключ директор вводит через настройки.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import http from "node:http";
@@ -9,17 +9,20 @@ const BASE = process.env.BASE_URL ?? state.base;
 const MOCK_PORT = Number(process.env.WHAPI_MOCK_PORT ?? 5199);
 const origin = new URL(BASE).origin;
 
-// Заглушка Whapi: принимает отправленные сообщения и отвечает на /health.
+// Заглушка Whapi: принимает отправленные сообщения, настройку вебхука и отвечает на /health.
 const sent = [];
+let webhookUrl = null;
 const mock = http.createServer((req, res) => {
   let body = "";
   req.on("data", (c) => (body += c));
   req.on("end", () => {
     if (req.url === "/health") {
-      res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({ status: { text: "AUTH" }, user: { id: "77010000000" } }));
+      const ok = req.headers.authorization === "Bearer test-token";
+      res.writeHead(ok ? 200 : 401, { "content-type": "application/json" });
+      res.end(JSON.stringify(ok ? { status: { text: "AUTH" }, user: { id: "77010000000" } } : { error: "unauthorized" }));
       return;
     }
+    if (req.url === "/settings" && req.method === "PATCH") webhookUrl = JSON.parse(body).webhooks?.[0]?.url ?? null;
     if (req.url === "/messages/text") sent.push(JSON.parse(body));
     res.writeHead(200, { "content-type": "application/json" });
     res.end(JSON.stringify({ sent: true }));
@@ -52,10 +55,27 @@ try {
   await m1("POST", "/api/auth/login", { login: `m1-${state.suffix}t`, password: "password-123" });
   await director("POST", "/api/auth/login", state.director);
 
-  step("Подключения: реальное состояние канала и адрес вебхука");
-  let r = await director("GET", "/api/settings/connections");
-  assert.equal(r.data.whapi.ok, true, JSON.stringify(r.data.whapi));
-  const webhook = new URL(r.data.whapi.webhookUrl).pathname;
+  step("Настройки помощника: только директор, ключ проверяется, адрес входящих прописывается сам");
+  let r = await m1("GET", "/api/settings/assistant");
+  assert.equal(r.status, 403, "руководителю настройки помощника недоступны");
+  r = await director("GET", "/api/settings/assistant");
+  assert.equal(r.data.whatsapp.set, false);
+  const base = { model: "gpt-4.1-mini", assistantName: "Помощник", instructions: "Отвечай коротко." };
+  r = await director("PATCH", "/api/settings/assistant", { ...base, whapiKey: "wrong-token" });
+  assert.equal(r.status, 400);
+  assert.equal(r.data.error.code, "whapi_key_wrong");
+  r = await director("PATCH", "/api/settings/assistant", { ...base, whapiKey: "test-token" });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(r.data.whatsapp.set, true);
+  assert.equal(r.data.whatsapp.last4, "oken");
+  assert.equal(r.data.whatsapp.status, "connected");
+  assert.equal(r.data.whatsapp.number, "77010000000", "рабочий номер подставился сам");
+  assert.equal(r.data.instructions, "Отвечай коротко.");
+  assert.ok(!JSON.stringify(r.data).includes("test-token"), "ключ не отдаётся в браузер");
+  assert.ok(webhookUrl, "адрес входящих сообщений зарегистрирован в Whapi");
+  const webhook = new URL(webhookUrl).pathname;
+  r = await e1("GET", "/api/me");
+  assert.equal(r.data.system.whatsapp, true);
   const hook = (messages) => fetch(BASE + webhook, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ messages }) });
   assert.equal((await fetch(`${BASE}/api/whapi/webhook/wrong-key`, { method: "POST", body: "{}" })).status, 404, "чужой ключ вебхука отклоняется");
 
@@ -106,6 +126,23 @@ try {
     await wait(300);
   }
   assert.ok(sent.some((s) => s.to === PHONE && /Вам назначена задача: «Проверить витрину»/.test(s.body)));
+
+  step("Номер, который указал директор: бот отвечает, после закрытия доступа — молчит");
+  const M1_PHONE = "77015556677";
+  const m1Id = (await m1("GET", "/api/me")).data.user.id;
+  r = await director("PATCH", `/api/members/${m1Id}`, { phone: "+7 701 555 66 77" });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  r = await director("GET", "/api/members?branch=all");
+  assert.equal(r.data.members.find((x) => x.userId === m1Id).phone, M1_PHONE);
+  let n = sent.length;
+  await hook([{ id: "wa-m1", from: M1_PHONE, type: "text", text: { body: "мои задачи" } }]);
+  assert.ok(sent.length > n && sent.at(-1).to === M1_PHONE, "активному сотруднику бот отвечает");
+  r = await director("PATCH", `/api/members/${m1Id}`, { phone: "123" });
+  assert.equal(r.status, 400, "неверный номер отклоняется");
+  await director("PATCH", `/api/members/${m1Id}`, { active: false });
+  n = sent.length;
+  await hook([{ id: "wa-m1-2", from: M1_PHONE, type: "text", text: { body: "мои задачи" } }]);
+  assert.equal(sent.length, n, "сотруднику без доступа бот не отвечает");
 
   step("Отвязка номера: дальше ничего не отправляется");
   await e1("DELETE", "/api/me/phone");

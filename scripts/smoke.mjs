@@ -104,15 +104,9 @@ r = await director("POST", "/api/invites", { role: "manager", branchId: b2 });
 const m2Inv = tokenOf(r.data.inviteUrl);
 r = await director("POST", "/api/invites", { role: "director", branchId: b1 });
 assert.equal(r.status, 400, "директора по приглашению не создать");
-r = await director("PATCH", "/api/settings/process", {
-  acceptanceEnabled: true,
-  statusNames: { new: "Новая", in_progress: "В работе", review: "На проверке", done: "Завершена" },
-  cancelledName: "Отменена",
-  employeeSeesColleagues: false,
-  speedFrom: "started",
-  assistantName: "Помощник",
-  assistantModel: "gpt-4.1-mini",
-});
+r = await director("GET", "/api/settings");
+assert.equal(r.status, 200);
+r = await director("PATCH", "/api/settings/company", { ...r.data, logoUrl: undefined, acceptanceEnabled: true, employeeSeesColleagues: false });
 assert.equal(r.status, 200, JSON.stringify(r.data));
 
 r = await manager("POST", "/api/invites/accept", { token: mInv, login: `mgr-${suffix}`, displayName: "Руководитель Один", password: "manager-pass-1" });

@@ -1,25 +1,25 @@
 /** Компания, настройки, филиалы и участники. */
-import { and, asc, eq, isNotNull, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import { audit } from "../audit";
 import type { Actor } from "../context";
 import { newId } from "../crypto";
 import { getDb, schema } from "../db";
-import { getEnv, hasSecret } from "../env";
-import { AppError, forbidden, notFound } from "../errors";
+import { AppError, notFound } from "../errors";
 import {
   assertBranchAccess,
   assertCanManageMember,
   assertDirector,
-  assertManagerOrDirector,
   capabilities,
   isDirector,
   resolveBranchScope,
 } from "../permissions";
 import { revokeAllSessions } from "../session";
+import { getEnv } from "../env";
 import { ASSISTANT_MODELS, companySettingsSchema, saveSettings } from "../settings";
 import { dueMomentInZone, isValidTimeZone } from "../time";
-import { whapiHealth, webhookKey } from "../whatsapp/whapi";
+import { saveSecret, secretInfo } from "../integrations";
+import { registerWebhook, whapiHealth, webhookKey } from "../whatsapp/whapi";
 import { seedWorkflow } from "./setup";
 
 // ---------- Текущий участник ----------
@@ -51,6 +51,8 @@ export async function me(actor: Actor) {
     dueTime: actor.settings.dueTime,
     branding: { accent: actor.settings.accent, logoUrl: actor.settings.logoUrl, fontFamily: actor.settings.fontFamily },
     assistantName: actor.settings.assistantName,
+    /** Для индикатора в меню: умный режим помощника и WhatsApp подключены. */
+    system: { smartAssistant: (await secretInfo("openai")).set, whatsapp: (await secretInfo("whapi")).set },
   };
 }
 
@@ -61,20 +63,17 @@ function maskPhone(phone: string): string {
 
 // ---------- Настройки системы ----------
 
-/** Всё, что нужно вкладкам «Компания» и «Процесс». */
+/** Вкладка «Компания». */
 export async function getSystemSettings(actor: Actor) {
   assertDirector(actor);
-  const statuses = await getDb()
-    .select()
-    .from(schema.taskStatuses)
-    .where(eq(schema.taskStatuses.companyId, actor.company.id))
-    .orderBy(asc(schema.taskStatuses.sort));
   return {
-    company: { name: actor.company.name, timezone: actor.company.timezone },
-    settings: actor.settings,
-    statuses: statuses.map((s) => ({ key: s.key, name: s.name, category: s.category })),
-    timezones: Intl.supportedValuesOf("timeZone"),
-    models: ASSISTANT_MODELS,
+    name: actor.company.name,
+    timezone: actor.company.timezone,
+    accent: actor.settings.accent,
+    logoUrl: actor.settings.logoUrl,
+    workDays: actor.settings.workDays,
+    acceptanceEnabled: actor.settings.acceptanceEnabled,
+    employeeSeesColleagues: actor.settings.employeeSeesColleagues,
   };
 }
 
@@ -82,65 +81,67 @@ export const updateCompanySchema = z.object({
   name: z.string().trim().min(1, "required").max(120, "too_long"),
   timezone: z.string().trim().refine(isValidTimeZone, "timezone_invalid"),
   accent: companySettingsSchema.shape.accent,
-  logoUrl: companySettingsSchema.shape.logoUrl,
-  fontFamily: companySettingsSchema.shape.fontFamily,
-  dueTime: companySettingsSchema.shape.dueTime,
   workDays: companySettingsSchema.shape.workDays,
+  acceptanceEnabled: z.boolean(),
+  employeeSeesColleagues: z.boolean(),
 });
 
-/** Вкладка «Компания»: название, оформление, часовой пояс, срок по умолчанию, рабочие дни. */
+/** Название, оформление, часовой пояс, рабочие дни и правила работы с задачами. */
 export async function updateCompany(actor: Actor, input: z.infer<typeof updateCompanySchema>) {
   assertDirector(actor);
   const db = getDb();
-  await db
-    .update(schema.companies)
-    .set({ name: input.name, timezone: input.timezone, updatedAt: Date.now() })
-    .where(eq(schema.companies.id, actor.company.id));
+  await db.update(schema.companies).set({ name: input.name, timezone: input.timezone, updatedAt: Date.now() }).where(eq(schema.companies.id, actor.company.id));
   const settings = await saveSettings(
     actor.company.id,
-    { accent: input.accent, logoUrl: input.logoUrl, fontFamily: input.fontFamily, dueTime: input.dueTime, workDays: input.workDays },
+    { accent: input.accent, workDays: input.workDays, acceptanceEnabled: input.acceptanceEnabled, employeeSeesColleagues: input.employeeSeesColleagues },
     actor.user.id,
   );
-  // Пояс или время срока по умолчанию изменились — пересчитать моменты сроков открытых задач.
-  if (input.timezone !== actor.company.timezone || input.dueTime !== actor.settings.dueTime) {
+  if (input.acceptanceEnabled !== actor.settings.acceptanceEnabled) await seedWorkflow(actor.company.id, input.acceptanceEnabled);
+  // Сменился часовой пояс — сроки открытых задач пересчитываются.
+  if (input.timezone !== actor.company.timezone) {
     const open = await db
       .select({ id: schema.tasks.id, dueDate: schema.tasks.dueDate, dueTime: schema.tasks.dueTime })
       .from(schema.tasks)
       .where(and(eq(schema.tasks.companyId, actor.company.id), isNotNull(schema.tasks.dueDate), isNull(schema.tasks.completedAt)));
     for (const t of open) {
-      const dueAt = dueMomentInZone(t.dueDate!, t.dueTime ?? settings.dueTime, input.timezone);
-      await db.update(schema.tasks).set({ dueAt }).where(eq(schema.tasks.id, t.id));
+      await db.update(schema.tasks).set({ dueAt: dueMomentInZone(t.dueDate!, t.dueTime ?? settings.dueTime, input.timezone) }).where(eq(schema.tasks.id, t.id));
     }
   }
   await audit({ companyId: actor.company.id, actorId: actor.user.id, action: "company.updated" });
   return { ok: true };
 }
 
-export const updateProcessSchema = z.object({
-  acceptanceEnabled: z.boolean(),
-  statusNames: z.record(z.string(), z.string().trim().min(1, "required").max(40, "too_long")),
-  cancelledName: companySettingsSchema.shape.cancelledName,
-  employeeSeesColleagues: z.boolean(),
-  speedFrom: companySettingsSchema.shape.speedFrom,
-  assistantName: companySettingsSchema.shape.assistantName,
-  assistantModel: companySettingsSchema.shape.assistantModel,
-});
+const LOGO_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
 
-/** Вкладка «Процесс»: приёмка, названия статусов, видимость, методика статистики, помощник. */
-export async function updateProcess(actor: Actor, input: z.infer<typeof updateProcessSchema>) {
+/** Логотип загружается файлом (до 1 МБ) и хранится в файловом хранилище. */
+export async function uploadLogo(actor: Actor, file: File | null) {
   assertDirector(actor);
-  const db = getDb();
-  for (const [key, name] of Object.entries(input.statusNames)) {
-    await db
-      .update(schema.taskStatuses)
-      .set({ name })
-      .where(and(eq(schema.taskStatuses.companyId, actor.company.id), eq(schema.taskStatuses.key, key)));
+  const bucket = getEnv().BUCKET;
+  if (!bucket) throw new AppError("files_unavailable", 503);
+  if (!file) {
+    await bucket.delete("branding/logo").catch(() => {});
+    await saveSettings(actor.company.id, { logoUrl: "" }, actor.user.id);
+    return { logoUrl: "" };
   }
-  const { statusNames: _ignored, ...rest } = input;
-  await saveSettings(actor.company.id, rest, actor.user.id);
-  if (input.acceptanceEnabled !== actor.settings.acceptanceEnabled) await seedWorkflow(actor.company.id, input.acceptanceEnabled);
-  await audit({ companyId: actor.company.id, actorId: actor.user.id, action: "process.updated" });
-  return { ok: true };
+  if (!LOGO_TYPES.has(file.type)) throw new AppError("logo_type", 400);
+  if (file.size > 1024 * 1024) throw new AppError("logo_too_large", 413);
+  await bucket.put("branding/logo", await file.arrayBuffer(), { httpMetadata: { contentType: file.type } });
+  const logoUrl = `/api/branding/logo?v=${Date.now()}`;
+  await saveSettings(actor.company.id, { logoUrl }, actor.user.id);
+  return { logoUrl };
+}
+
+/** Логотип публичный: он виден и на странице входа. */
+export async function logoResponse(): Promise<Response> {
+  const object = await getEnv().BUCKET?.get("branding/logo");
+  if (!object) return new Response("Not found", { status: 404 });
+  return new Response(object.body, {
+    headers: {
+      "content-type": object.httpMetadata?.contentType ?? "image/png",
+      "cache-control": "public, max-age=86400",
+      "x-content-type-options": "nosniff",
+    },
+  });
 }
 
 // ---------- Филиалы ----------
@@ -157,7 +158,12 @@ export async function listBranches(actor: Actor) {
         : and(eq(schema.branches.companyId, actor.company.id), eq(schema.branches.id, actor.membership.branchId!)),
     )
     .orderBy(asc(schema.branches.name));
-  return rows.map((r) => ({ id: r.id, name: r.name }));
+  const counts = await getDb()
+    .select({ branchId: schema.memberships.branchId, n: sql<number>`count(*)` })
+    .from(schema.memberships)
+    .where(and(eq(schema.memberships.companyId, actor.company.id), isNull(schema.memberships.revokedAt)))
+    .groupBy(schema.memberships.branchId);
+  return rows.map((r) => ({ id: r.id, name: r.name, members: Number(counts.find((c) => c.branchId === r.id)?.n ?? 0) }));
 }
 
 async function assertUniqueBranchName(companyId: string, name: string, exceptId?: string) {
@@ -234,6 +240,7 @@ export async function listMembers(actor: Actor, branch: string | null) {
       login: schema.users.login,
       displayName: schema.users.displayName,
       phoneVerifiedAt: schema.users.phoneVerifiedAt,
+      phone: schema.users.phone,
       role: schema.memberships.role,
       position: schema.memberships.position,
       branchId: schema.memberships.branchId,
@@ -269,6 +276,7 @@ export async function listMembers(actor: Actor, branch: string | null) {
       branchId: r.branchId,
       branchName: actor.branches.find((b) => b.id === r.branchId)?.name ?? null,
       phoneLinked: Boolean(r.phoneVerifiedAt),
+      phone: director && r.phoneVerifiedAt ? r.phone : null,
       canInvite: r.canInvite,
       active: !r.revokedAt,
       self: r.userId === actor.user.id,
@@ -280,6 +288,8 @@ export const updateMemberSchema = z.object({
   branchId: z.string().min(1).optional(),
   position: z.string().trim().max(120).nullable().optional(),
   canInvite: z.boolean().optional(),
+  /** Номер WhatsApp сотрудника, который вводит директор («» — убрать). Бот отвечает только этим номерам. */
+  phone: z.string().trim().max(20).optional(),
   /** false — отозвать доступ (сессии завершаются сразу), true — вернуть. */
   active: z.boolean().optional(),
 });
@@ -313,6 +323,15 @@ export async function updateMember(actor: Actor, userId: string, input: z.infer<
   }
   await db.update(schema.memberships).set(patch).where(eq(schema.memberships.id, membership.id));
   if (patch.revokedAt) await revokeAllSessions(userId);
+  if (input.phone !== undefined) {
+    const phone = input.phone.replaceAll(/\D/g, "");
+    if (phone && (phone.length < 10 || phone.length > 15)) throw new AppError("phone_invalid", 400, { fields: { phone: "phone_invalid" } });
+    if (phone) {
+      // Один номер — один сотрудник.
+      await db.update(schema.users).set({ phone: null, phoneVerifiedAt: null }).where(and(eq(schema.users.phone, phone), ne(schema.users.id, userId)));
+    }
+    await db.update(schema.users).set({ phone: phone || null, phoneVerifiedAt: phone ? now : null, updatedAt: now }).where(eq(schema.users.id, userId));
+  }
   await audit({
     companyId: actor.company.id,
     actorId: actor.user.id,
@@ -324,35 +343,83 @@ export async function updateMember(actor: Actor, userId: string, input: z.infer<
   return { ok: true };
 }
 
-// ---------- Подключения ----------
+// ---------- WhatsApp и помощник ----------
 
-/** Реальное состояние подключений. Возвращается только факт наличия секретов, не значения. */
-export async function connections(actor: Actor, origin: string) {
-  assertManagerOrDirector(actor);
-  if (!isDirector(actor)) throw forbidden();
-  const env = getEnv();
-  const push = hasSecret("VAPID_PUBLIC_KEY") && hasSecret("VAPID_PRIVATE_KEY");
-  const health = await whapiHealth();
-  const key = await webhookKey();
+/** Модели OpenAI, из которых директор выбирает (название и подсказка — в интерфейсе). */
+export { ASSISTANT_MODELS };
+
+async function openaiCheck(key: string): Promise<"connected" | "wrong_key" | "unreachable"> {
+  try {
+    const res = await fetch("https://api.openai.com/v1/models", { headers: { authorization: `Bearer ${key}` } });
+    if (res.status === 401 || res.status === 403) return "wrong_key";
+    return res.ok ? "connected" : "unreachable";
+  } catch {
+    return "unreachable";
+  }
+}
+
+/** Настройки WhatsApp-агента и помощника — только директор. Ключи наружу не отдаются. */
+export async function getAssistantSettings(actor: Actor) {
+  assertDirector(actor);
+  const [whapi, openai, health] = await Promise.all([secretInfo("whapi"), secretInfo("openai"), whapiHealth()]);
+  const [{ n } = { n: 0 }] = await getDb()
+    .select({ n: sql<number>`count(*)` })
+    .from(schema.memberships)
+    .innerJoin(schema.users, eq(schema.users.id, schema.memberships.userId))
+    .where(and(eq(schema.memberships.companyId, actor.company.id), isNull(schema.memberships.revokedAt), isNotNull(schema.users.phoneVerifiedAt)));
   return {
-    whapi: {
-      ok: health.ok,
-      configured: hasSecret("WHAPI_TOKEN"),
-      status: health.status,
-      channelPhone: health.phone,
-      workNumber: actor.settings.whapiPhone,
-      webhookUrl: key ? `${origin}/api/whapi/webhook/${key}` : null,
-    },
-    openai: { ok: hasSecret("OPENAI_API_KEY"), configured: hasSecret("OPENAI_API_KEY"), model: actor.settings.assistantModel },
-    push: { ok: push, configured: push },
-    files: { ok: Boolean(env.BUCKET), configured: Boolean(env.BUCKET) },
+    whatsapp: { set: whapi.set, last4: whapi.last4, status: health.status, number: actor.settings.whapiPhone || health.phone || "" },
+    openai: { set: openai.set, last4: openai.last4, status: openai.set ? (openai.status ?? "unchecked") : "not_set" },
+    model: actor.settings.assistantModel,
+    assistantName: actor.settings.assistantName,
+    instructions: actor.settings.assistantInstructions,
+    employeesWithPhone: Number(n),
   };
 }
 
-export const whatsappSettingsSchema = z.object({ workNumber: z.string().trim().max(20) });
+export const updateAssistantSchema = z.object({
+  /** undefined — не менять; "" — отключить. */
+  whapiKey: z.string().trim().max(300).optional(),
+  openaiKey: z.string().trim().max(300).optional(),
+  model: companySettingsSchema.shape.assistantModel,
+  assistantName: companySettingsSchema.shape.assistantName,
+  instructions: companySettingsSchema.shape.assistantInstructions,
+  number: z.string().trim().max(20).optional(),
+});
 
-export async function updateWhatsappSettings(actor: Actor, input: z.infer<typeof whatsappSettingsSchema>) {
+export async function updateAssistantSettings(actor: Actor, input: z.infer<typeof updateAssistantSchema>, origin: string) {
   assertDirector(actor);
-  await saveSettings(actor.company.id, { whapiPhone: input.workNumber.replaceAll(/\D/g, "") }, actor.user.id);
-  return { ok: true };
+  let number = (input.number ?? actor.settings.whapiPhone).replaceAll(/\D/g, "");
+
+  if (input.whapiKey !== undefined) {
+    if (input.whapiKey) {
+      const health = await whapiHealth(input.whapiKey);
+      if (health.status === "wrong_key") throw new AppError("whapi_key_wrong", 400, { fields: { whapiKey: "whapi_key_wrong" } });
+      await saveSecret("whapi", input.whapiKey, actor.user.id);
+      // Адрес для входящих сообщений прописывается в Whapi автоматически.
+      const key = await webhookKey(input.whapiKey);
+      if (key) await registerWebhook(input.whapiKey, `${origin}/api/whapi/webhook/${key}`);
+      if (!number && health.phone) number = health.phone;
+    } else {
+      await saveSecret("whapi", "", actor.user.id);
+    }
+  }
+
+  if (input.openaiKey !== undefined) {
+    if (input.openaiKey) {
+      const status = await openaiCheck(input.openaiKey);
+      if (status === "wrong_key") throw new AppError("openai_key_wrong", 400, { fields: { openaiKey: "openai_key_wrong" } });
+      await saveSecret("openai", input.openaiKey, actor.user.id, { status, checkedAt: Date.now() });
+    } else {
+      await saveSecret("openai", "", actor.user.id);
+    }
+  }
+
+  await saveSettings(
+    actor.company.id,
+    { assistantModel: input.model, assistantName: input.assistantName, assistantInstructions: input.instructions, whapiPhone: number },
+    actor.user.id,
+  );
+  await audit({ companyId: actor.company.id, actorId: actor.user.id, action: "assistant.settings_updated" });
+  return getAssistantSettings({ ...actor, settings: { ...actor.settings, assistantModel: input.model, assistantName: input.assistantName, assistantInstructions: input.instructions, whapiPhone: number } });
 }

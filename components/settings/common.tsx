@@ -2,29 +2,9 @@
 
 import * as React from "react";
 import { LoadError } from "@/components/forms";
-import { Spinner } from "@/components/ui/card";
+import { PageSkeleton } from "@/components/ui/skeleton";
 import { api, ApiError } from "@/lib/api";
-import { errorText, t } from "@/lib/i18n";
-
-export type SystemSettings = {
-  company: { name: string; timezone: string };
-  settings: {
-    accent: string;
-    logoUrl: string;
-    fontFamily: string;
-    dueTime: string;
-    workDays: number[];
-    acceptanceEnabled: boolean;
-    employeeSeesColleagues: boolean;
-    speedFrom: "started" | "assigned";
-    cancelledName: string;
-    assistantName: string;
-    assistantModel: string;
-  };
-  statuses: { key: string; name: string; category: string }[];
-  timezones: string[];
-  models: string[];
-};
+import { errorText } from "@/lib/i18n";
 
 /** Загрузка данных вкладки с состояниями «загрузка / ошибка с повтором». */
 export function useLoad<T>(path: string) {
@@ -44,9 +24,5 @@ export function useLoad<T>(path: string) {
 
 export function Loading({ error, onRetry }: { error: string | null; onRetry: () => void }) {
   if (error) return <LoadError message={error} onRetry={onRetry} />;
-  return (
-    <p className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
-      <Spinner /> {t("app.loading")}
-    </p>
-  );
+  return <PageSkeleton rows={3} />;
 }

@@ -3,6 +3,7 @@
 import * as React from "react";
 import { api } from "@/lib/api";
 import { registerServiceWorker } from "@/lib/pwa";
+import { ToastProvider } from "@/components/ui/toast";
 
 export type Me = {
   user: { id: string; login: string; displayName: string; phoneLinked: boolean; phoneMasked: string | null };
@@ -21,6 +22,7 @@ export type Me = {
     inviteEmployees: boolean;
     viewStats: boolean;
     viewSystemSettings: boolean;
+    manageTeam: boolean;
     switchBranch: boolean;
     assignOthers: boolean;
     acceptResults: boolean;
@@ -30,6 +32,7 @@ export type Me = {
   dueTime: string;
   branding: { accent: string; logoUrl: string; fontFamily: string };
   assistantName: string;
+  system: { smartAssistant: boolean; whatsapp: boolean };
 };
 
 /** Выбор в шапке: конкретный филиал или «all» (только у директора). */
@@ -108,7 +111,11 @@ export function CabinetProvider({ initialMe, children }: { initialMe: Me; childr
     () => ({ me, refreshMe, branchId, concreteBranchId, setBranchId, branchEpoch }),
     [me, refreshMe, branchId, concreteBranchId, setBranchId, branchEpoch],
   );
-  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
+  return (
+    <Ctx.Provider value={value}>
+      <ToastProvider>{children}</ToastProvider>
+    </Ctx.Provider>
+  );
 }
 
 export function useCabinet(): CabinetState {

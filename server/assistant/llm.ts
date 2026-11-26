@@ -1,11 +1,11 @@
 /**
- * Помощник на модели GPT (OpenAI Chat Completions + tools). Ключ — только из секрета OPENAI_API_KEY.
+ * Помощник на модели GPT (OpenAI Chat Completions + tools). Ключ директор вводит в настройках, он хранится зашифрованным.
  * Модель вызывает те же действия, что и команды; права проверяют серверные операции.
  * Отмена задачи и массовые изменения не выполняются моделью: она лишь готовит запрос, а выполнение —
  * только после ответа участника «да» (детерминированно, в engine.ts).
  */
 import type { Actor } from "../context";
-import { getEnv } from "../env";
+import { getSecret } from "../integrations";
 import { formatShortDateTime } from "../../lib/format";
 import * as act from "./actions";
 import type { Pending } from "./engine";
@@ -115,10 +115,16 @@ type Message =
   | { role: "assistant"; content: string | null; tool_calls?: ToolCall[] }
   | { role: "tool"; tool_call_id: string; content: string };
 
+async function openaiKey(): Promise<string> {
+  const key = await getSecret("openai");
+  if (!key) throw new Error("openai_key_missing");
+  return key;
+}
+
 async function chat(model: string, messages: Message[]) {
   const res = await fetch(`${API}/chat/completions`, {
     method: "POST",
-    headers: { authorization: `Bearer ${getEnv().OPENAI_API_KEY!.trim()}`, "content-type": "application/json" },
+    headers: { authorization: `Bearer ${await openaiKey()}`, "content-type": "application/json" },
     body: JSON.stringify({ model, messages, tools, tool_choice: "auto", temperature: 0.2 }),
   });
   if (!res.ok) throw new Error(`openai_${res.status}`);
@@ -146,7 +152,10 @@ export async function runModel(
     "Используй инструменты; не выдумывай задачи и номера. Если подходит несколько задач — перечисли их с номерами и попроси выбрать.",
     "Отмену и массовые изменения только подготавливай (request_*) и проси ответить «да».",
     "После изменения назови номер задачи.",
-  ].join("\n");
+    actor.settings.assistantInstructions ? `Инструкции компании:\n${actor.settings.assistantInstructions}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
   const messages: Message[] = [{ role: "system", content: system }, ...history.slice(-12), { role: "user", content: text }];
 
   for (let step = 0; step < 5; step++) {
@@ -238,7 +247,7 @@ export async function transcribe(audio: File, model: string): Promise<string> {
   form.set("language", "ru");
   const res = await fetch(`${API}/audio/transcriptions`, {
     method: "POST",
-    headers: { authorization: `Bearer ${getEnv().OPENAI_API_KEY!.trim()}` },
+    headers: { authorization: `Bearer ${await openaiKey()}` },
     body: form,
   });
   if (!res.ok) throw new Error(`openai_${res.status}`);

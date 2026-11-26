@@ -135,7 +135,7 @@ export async function requestRecoveryCode(login: string) {
   await assertNotLocked(key);
   const db = getDb();
   const user = await db.query.users.findFirst({ where: eq(schema.users.login, login) });
-  if (!user?.phone || !user.phoneVerifiedAt || user.disabledAt || !whapiConfigured()) return { ok: true };
+  if (!user?.phone || !user.phoneVerifiedAt || user.disabledAt || !(await whapiConfigured())) return { ok: true };
   const now = Date.now();
   // Не чаще раза в минуту на участника.
   const recent = await db.query.passwordResets.findFirst({

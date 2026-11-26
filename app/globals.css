@@ -39,7 +39,7 @@
   --am-danger: #d32f2f;
   --am-success: #1f8a46;
   --am-warning: #a15c00;
-  --am-radius: 0.625rem;
+  --am-radius: 0.75rem;
   --am-font: "Inter", "Noto Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
   color-scheme: light;
 }
@@ -74,6 +74,57 @@ select:focus-visible {
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+}
+
+/* Плавное появление содержимого и всплывающих сообщений. */
+@keyframes am-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes am-pop {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes am-shimmer {
+  from {
+    background-position: -200% 0;
+  }
+  to {
+    background-position: 200% 0;
+  }
+}
+.am-fade-up {
+  animation: am-fade-up 0.28s ease-out both;
+}
+.am-pop {
+  animation: am-pop 0.22s ease-out both;
+}
+.am-skeleton {
+  background: linear-gradient(90deg, var(--am-muted) 25%, #e9ecf1 50%, var(--am-muted) 75%);
+  background-size: 200% 100%;
+  animation: am-shimmer 1.4s linear infinite;
+}
+.am-lift {
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.15s ease,
+    border-color 0.15s ease;
+}
+.am-lift:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(16, 24, 40, 0.08);
 }
 
 .pb-safe {

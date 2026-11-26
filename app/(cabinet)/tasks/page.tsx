@@ -1,6 +1,6 @@
 "use client";
 
-import { Building2, Columns3, Download, List, ListTodo, MoreHorizontal, Plus, Search, SearchX } from "lucide-react";
+import { AlertTriangle, Building2, CheckCircle2, Clock3, Columns3, Download, Eye, List, ListTodo, MoreHorizontal, Plus, Search, SearchX } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { DropdownMenu } from "radix-ui";
@@ -14,6 +14,7 @@ import { DueText, StatusPill, transitionLabel } from "@/components/tasks/labels"
 import { StatusDialog } from "@/components/tasks/task-dialogs";
 import type { TaskCard, TaskList, TaskListItem, TransitionInfo } from "@/components/tasks/types";
 import { useTaskAction } from "@/components/tasks/use-task";
+import { Avatar } from "@/components/ui/avatar";
 import { Button, Kbd } from "@/components/ui/button";
 import { Card, Spinner } from "@/components/ui/card";
 import { NativeSelect } from "@/components/ui/input";
@@ -211,6 +212,7 @@ export default function TasksPage() {
     <>
       <PageHeader title={t("tasks.title")} />
       <PageBody className="flex flex-col gap-3">
+        <Overview data={data} statuses={statuses} filters={filters} set={set} />
         {/* Поиск, вид, «Мои / Все», создание. */}
         <div className="flex flex-wrap items-center gap-2">
           <form
@@ -410,10 +412,65 @@ function StatusChip({ label, count, active, onClick }: { label: string; count?: 
 
 function AssigneeCell({ item, allBranches }: { item: TaskListItem; allBranches: boolean }) {
   return (
-    <span className="break-words">
-      {item.assignee.displayName}
-      {allBranches && item.branchName ? <span className="text-foreground/80"> · {item.branchName}</span> : null}
+    <span className="flex min-w-0 items-center gap-2.5">
+      <Avatar name={item.assignee.displayName} size={30} />
+      <span className="min-w-0">
+        <span className="block truncate" title={item.assignee.displayName}>
+          {item.assignee.displayName}
+        </span>
+        {allBranches && item.branchName ? <span className="block truncate text-xs text-muted-foreground">{item.branchName}</span> : null}
+      </span>
     </span>
+  );
+}
+
+/** Сводка над списком: сколько в работе, просрочено, ждёт проверки, сделано. Нажатие — фильтр. */
+function Overview({
+  data,
+  statuses,
+  filters,
+  set,
+}: {
+  data: TaskList | null;
+  statuses: { key: string; category: string }[];
+  filters: Filters;
+  set: (patch: Partial<Filters>) => void;
+}) {
+  const sum = (cats: string[]) => statuses.filter((s) => cats.includes(s.category)).reduce((n, s) => n + (data?.counts.byStatus[s.key] ?? 0), 0);
+  const first = (cat: string) => statuses.find((s) => s.category === cat)?.key ?? "";
+  const review = first("review");
+  const tiles = [
+    { key: "work", icon: Clock3, value: sum(["open", "progress"]), label: t("tasks.overview.work"), tone: "text-primary bg-selected", active: false, onClick: () => set({ status: "", due: "" }) },
+    { key: "overdue", icon: AlertTriangle, value: data?.counts.overdue ?? 0, label: t("tasks.overview.overdue"), tone: "text-destructive bg-destructive/10", active: filters.due === "overdue", onClick: () => set({ due: filters.due === "overdue" ? "" : "overdue", status: "" }) },
+    ...(review
+      ? [{ key: "review", icon: Eye, value: sum(["review"]), label: t("tasks.overview.review"), tone: "text-[#b45309] bg-[#fef3c7]", active: filters.status === review, onClick: () => set({ status: filters.status === review ? "" : review, due: "" }) }]
+      : []),
+    { key: "done", icon: CheckCircle2, value: sum(["done"]), label: t("tasks.overview.done"), tone: "text-success bg-success/10", active: filters.status === first("done"), onClick: () => set({ status: filters.status === first("done") ? "" : first("done"), due: "" }) },
+  ];
+  return (
+    <div className={cn("grid grid-cols-2 gap-3", tiles.length === 4 ? "lg:grid-cols-4" : "lg:grid-cols-3")}>
+      {tiles.map(({ key, icon: Icon, value, label, tone, active, onClick }, i) => (
+        <button
+          key={key}
+          type="button"
+          onClick={onClick}
+          aria-pressed={active}
+          style={{ animationDelay: `${i * 50}ms` }}
+          className={cn(
+            "am-lift am-fade-up flex items-center gap-3 rounded-xl border bg-surface p-3.5 text-left shadow-[0_1px_3px_rgba(16,24,40,0.05)]",
+            active ? "border-primary ring-2 ring-primary/15" : "border-border",
+          )}
+        >
+          <span className={cn("flex size-10 shrink-0 items-center justify-center rounded-xl", tone)}>
+            <Icon className="size-5" />
+          </span>
+          <span className="min-w-0">
+            <span className="block text-2xl font-bold leading-tight tabular-nums">{data ? value : "–"}</span>
+            <span className="block truncate text-sm text-muted-foreground">{label}</span>
+          </span>
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -744,7 +801,10 @@ function BoardCard({
         </DropdownMenu.Root>
       </div>
       <div className="mt-1.5 flex items-center justify-between gap-2 text-sm text-foreground/75">
-        <span className="min-w-0 truncate">{task.assignee.displayName}</span>
+        <span className="flex min-w-0 items-center gap-1.5">
+          <Avatar name={task.assignee.displayName} size={22} />
+          <span className="min-w-0 truncate">{task.assignee.displayName}</span>
+        </span>
         <span className="shrink-0 text-muted-foreground">#{task.number}</span>
       </div>
       <DueText dueAt={task.dueAt} overdue={task.overdue} timeZone={data.timezone} className="mt-1 block" />

@@ -11,7 +11,7 @@ export const ASSISTANT_MODELS = ["gpt-4.1-mini", "gpt-4.1", "gpt-4o-mini", "gpt-
 
 export const companySettingsSchema = z.object({
   accent: z.string().regex(/^#[0-9a-fA-F]{6}$/, "color_invalid"),
-  logoUrl: z.union([z.literal(""), z.string().url("url_invalid").startsWith("https://", "url_invalid").max(500)]),
+  logoUrl: z.union([z.literal(""), z.string().regex(/^\/api\/branding\/logo\?v=\d+$/, "url_invalid"), z.string().url("url_invalid").startsWith("https://", "url_invalid").max(500)]),
   fontFamily: z.string().trim().max(200).regex(/^[\w\s,"'-]*$/, "font_invalid"),
   /** Момент наступления срока, если указана только дата (HH:MM). */
   dueTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "time_invalid"),
@@ -25,6 +25,8 @@ export const companySettingsSchema = z.object({
   assistantModel: z.enum(ASSISTANT_MODELS),
   /** Рабочий номер WhatsApp компании (подсказка сотрудникам при привязке номера). */
   whapiPhone: z.string().regex(/^\d{0,15}$/, "phone_invalid"),
+  /** Инструкции помощника — одни и те же для WhatsApp и для чата на сайте. */
+  assistantInstructions: z.string().trim().max(2000, "too_long"),
 });
 
 export type CompanySettings = z.infer<typeof companySettingsSchema>;
@@ -42,6 +44,7 @@ export const DEFAULT_SETTINGS: CompanySettings = {
   assistantName: companyConfig.assistant.name,
   assistantModel: companyConfig.assistant.defaultModel as CompanySettings["assistantModel"],
   whapiPhone: "",
+  assistantInstructions: "",
 };
 
 const KEY = "company";

@@ -9,7 +9,7 @@ import type { Actor } from "../context";
 import { loadActorForUser } from "../context";
 import { newId } from "../crypto";
 import { getDb, schema } from "../db";
-import { getEnv } from "../env";
+import { pushKeys } from "../integrations";
 import { formatShortDateTime } from "../../lib/format";
 import { tzOffsetMs } from "../time";
 import { sendWhatsAppText, whapiConfigured } from "../whatsapp/whapi";
@@ -261,7 +261,7 @@ async function deliver(d: Delivery): Promise<{ status: "sent" | "cancelled" | "r
 
   if (d.channel === "whatsapp") {
     if (!prefs.channels.whatsapp) return { status: "cancelled", error: "channel_off" };
-    if (!whapiConfigured()) return { status: "failed", error: "whapi_missing" };
+    if (!(await whapiConfigured())) return { status: "failed", error: "whapi_missing" };
     const user = await db.query.users.findFirst({ where: eq(schema.users.id, d.userId) });
     if (!user?.phone || !user.phoneVerifiedAt) return { status: "cancelled", error: "phone_not_linked" };
     const res = await sendWhatsAppText(user.phone, [d.title, d.body, link].filter(Boolean).join("\n"));
@@ -270,8 +270,8 @@ async function deliver(d: Delivery): Promise<{ status: "sent" | "cancelled" | "r
 
   // push
   if (!prefs.channels.push) return { status: "cancelled", error: "channel_off" };
-  const env = getEnv();
-  if (!env.VAPID_PUBLIC_KEY || !env.VAPID_PRIVATE_KEY) return { status: "failed", error: "vapid_missing" };
+  const vapid = await pushKeys();
+  if (!vapid) return { status: "failed", error: "push_keys_missing" };
   const subs = await db
     .select()
     .from(schema.pushSubscriptions)
@@ -283,7 +283,7 @@ async function deliver(d: Delivery): Promise<{ status: "sent" | "cancelled" | "r
       const r = await sendWebPush(
         s,
         { title: d.title, body: d.body, url: d.url, tag: d.id },
-        { publicKey: env.VAPID_PUBLIC_KEY, privateKey: env.VAPID_PRIVATE_KEY, subject: origin || "mailto:noreply@example.com" },
+        { publicKey: vapid.publicKey, privateKey: vapid.privateKey, subject: origin || "mailto:noreply@example.com" },
       );
       if (r.ok) delivered++;
       if (r.gone) await db.update(schema.pushSubscriptions).set({ revokedAt: Date.now() }).where(eq(schema.pushSubscriptions.id, s.id));

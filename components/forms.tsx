@@ -6,7 +6,6 @@ import { ApiError } from "@/lib/api";
 import { errorText, fieldText, t } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { Button } from "./ui/button";
-import { Card } from "./ui/card";
 
 /**
  * Отправка формы: блокирует повторное нажатие, хранит ошибку и ошибки полей.
@@ -45,15 +44,53 @@ export function useSubmit<T>(action: () => Promise<T>) {
   return { run, pending, error, fieldErrors, setError };
 }
 
-/** Страницы без входа: одна карточка по центру. */
+/** Страницы без входа: на ПК — описание продукта слева и форма справа; на телефоне — только форма. */
 export function AuthShell({ title, description, children }: { title: string; description?: React.ReactNode; children: React.ReactNode }) {
+  const [brand, setBrand] = React.useState<{ name: string; logoUrl: string } | null>(null);
+  React.useEffect(() => {
+    fetch("/api/branding")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((b) => b && setBrand(b))
+      .catch(() => {});
+  }, []);
+  const name = brand?.name ?? "";
   return (
-    <main className="flex min-h-dvh items-center justify-center px-4 py-10">
-      <Card className="w-full max-w-[420px] p-6 sm:p-7">
-        <h1 className="text-2xl font-bold tracking-tight">{title}</h1>
-        {description ? <p className="mt-2 text-[15px] leading-relaxed text-muted-foreground">{description}</p> : null}
-        <div className="mt-5">{children}</div>
-      </Card>
+    <main className="grid min-h-dvh lg:grid-cols-[1.05fr_1fr]">
+      <section className="relative hidden overflow-hidden bg-gradient-to-br from-primary via-primary to-[#1b2f86] p-12 text-white lg:flex lg:flex-col lg:justify-between">
+        <div aria-hidden className="absolute -right-24 -top-24 size-96 rounded-full bg-white/10 blur-2xl" />
+        <div aria-hidden className="absolute -bottom-32 -left-16 size-96 rounded-full bg-white/5" />
+        <div className="relative flex items-center gap-3">
+          {brand?.logoUrl ? (
+            <img src={brand.logoUrl} alt="" className="size-11 rounded-xl bg-white object-contain p-1" />
+          ) : (
+            <span className="flex size-11 items-center justify-center rounded-xl bg-white/15 text-lg font-bold">{name.charAt(0) || "A"}</span>
+          )}
+          <span className="text-lg font-bold">{name}</span>
+        </div>
+        <div className="relative max-w-md">
+          <h2 className="text-4xl font-bold leading-tight tracking-tight">{t("auth.heroTitle")}</h2>
+          <ul className="mt-8 flex flex-col gap-4 text-[15px] text-white/90">
+            {(["f1", "f2", "f3"] as const).map((k) => (
+              <li key={k} className="flex items-start gap-3">
+                <Check className="mt-0.5 size-5 shrink-0 rounded-full bg-white/20 p-0.5" />
+                {t(`auth.${k}`)}
+              </li>
+            ))}
+          </ul>
+        </div>
+        <p className="relative text-sm text-white/60">{t("auth.footer")}</p>
+      </section>
+      <section className="flex items-center justify-center px-4 py-10">
+        <div className="am-fade-up w-full max-w-[400px]">
+          <div className="mb-6 flex items-center gap-3 lg:hidden">
+            <span className="flex size-10 items-center justify-center rounded-xl bg-primary text-base font-bold text-primary-foreground">{name.charAt(0) || "A"}</span>
+            <span className="font-bold">{name}</span>
+          </div>
+          <h1 className="text-2xl font-bold tracking-tight">{title}</h1>
+          {description ? <p className="mt-2 text-[15px] leading-relaxed text-muted-foreground">{description}</p> : null}
+          <div className="mt-6">{children}</div>
+        </div>
+      </section>
     </main>
   );
 }

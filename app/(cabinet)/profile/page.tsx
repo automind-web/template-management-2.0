@@ -6,8 +6,9 @@ import { useCabinet } from "@/components/cabinet/cabinet-context";
 import { WhatsappSection } from "@/components/cabinet/whatsapp-section";
 import { PageBody, PageHeader } from "@/components/cabinet/page-header";
 import { useSubmit } from "@/components/forms";
+import { Avatar } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import { Alert, Meta, Section, Spinner, StateDot } from "@/components/ui/card";
+import { Alert, Card, Meta, Section, Spinner, StateDot } from "@/components/ui/card";
 import { Field } from "@/components/ui/field";
 import { Input, Label } from "@/components/ui/input";
 import { companyConfig } from "@/config/company";
@@ -24,6 +25,20 @@ export default function ProfilePage() {
     <>
       <PageHeader title={t("profile.title")} />
       <PageBody className="flex max-w-3xl flex-col gap-4">
+        <Card className="relative overflow-hidden border-0 bg-gradient-to-br from-primary to-[#1b2f86] p-5 text-white sm:p-6">
+          <div aria-hidden className="absolute -right-12 -top-12 size-48 rounded-full bg-white/10 blur-xl" />
+          <div className="relative flex items-center gap-4">
+            <span className="rounded-full ring-4 ring-white/25">
+              <Avatar name={me.user.displayName} size={64} />
+            </span>
+            <div className="min-w-0">
+              <p className="truncate text-xl font-bold">{me.user.displayName}</p>
+              <p className="truncate text-sm text-white/80">
+                {[t(`roles.${me.role}`), me.role === "director" ? me.company.name : me.branch?.name].filter(Boolean).join(" · ")}
+              </p>
+            </div>
+          </div>
+        </Card>
         <PersonalSection />
         <WhatsappSection />
         <PasswordSection />

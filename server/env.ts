@@ -1,11 +1,7 @@
 import { env } from "cloudflare:workers";
 
-export type SecretName =
-  | "OWNER_ACTIVATION_CODE"
-  | "WHAPI_TOKEN"
-  | "OPENAI_API_KEY"
-  | "VAPID_PUBLIC_KEY"
-  | "VAPID_PRIVATE_KEY";
+/** Единственный секрет сайта. Ключи WhatsApp и OpenAI директор вводит в настройках, они хранятся в базе зашифрованными. */
+export type SecretName = "OWNER_ACTIVATION_CODE";
 
 /** Привязки и секреты. Секреты читаются только на сервере и не отдаются клиенту. */
 export function getEnv(): AppEnv {

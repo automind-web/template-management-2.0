@@ -224,7 +224,7 @@ export default function StatsPage() {
               <Tile
                 label={t("stats.tiles.speed")}
                 value={s.speed.medianMs === null ? "—" : formatDuration(s.speed.medianMs)}
-                note={`${t(`stats.notes.speed.${data.speedFrom}`)} · n = ${s.speed.n}`}
+                note={`${t(`stats.notes.speed.${data.speedFrom}`)} · ${t("stats.notes.tasksN", { n: s.speed.n })}`}
                 onClick={() => open(t("stats.tiles.speed"), s.speed.ids)}
               />
               <Tile
@@ -283,8 +283,7 @@ export default function StatsPage() {
                           <button type="button" className="font-semibold text-primary hover:underline" onClick={() => open(`${e.name}: ${t("stats.cols.speed")}`, e.speed.ids)}>
                             {formatDuration(e.speed.medianMs)}
                           </button>
-                        )}{" "}
-                        <span className="text-sm text-muted-foreground">n={e.speed.n}</span>
+                        )}
                       </td>
                       <Num m={e.early} title={`${e.name}: ${t("stats.cols.early")}`} onOpen={open} className="px-4" />
                     </tr>
