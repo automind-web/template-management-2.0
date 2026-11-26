@@ -18,6 +18,8 @@ import { whapiConfigured } from "./whatsapp/whapi";
 import { getDb, schema } from "./db";
 import { newId } from "./crypto";
 import * as assistant from "./assistant/service";
+import * as whatsappInbound from "./whatsapp/inbound";
+import * as whatsappLink from "./whatsapp/link";
 import * as stats from "./ops/stats";
 import * as tasks from "./ops/tasks";
 import { resolveBranch } from "./permissions";
@@ -164,7 +166,12 @@ route("PATCH", "/api/settings/process", async ({ request }) => {
   return json(await org.updateProcess(actor, await readJson(request, org.updateProcessSchema)));
 });
 
-route("GET", "/api/settings/connections", async ({ request }) => json(await org.connections(await requireActor(request))));
+route("GET", "/api/settings/connections", async ({ request }) => json(await org.connections(await requireActor(request), publicOrigin(request))));
+
+route("PATCH", "/api/settings/whatsapp", async ({ request }) => {
+  const actor = await requireActor(request);
+  return json(await org.updateWhatsappSettings(actor, await readJson(request, org.whatsappSettingsSchema)));
+});
 
 route("GET", "/api/branches", async ({ request }) => json({ branches: await org.listBranches(await requireActor(request)) }));
 
@@ -333,6 +340,15 @@ route("POST", "/api/push/unsubscribe", async ({ request }) => {
     .where(and(eq(schema.pushSubscriptions.endpoint, input.endpoint), eq(schema.pushSubscriptions.userId, actor.user.id)));
   return json({ ok: true });
 });
+
+// ---------- WhatsApp ----------
+
+route("POST", "/api/me/phone/code", async ({ request }) => json(await whatsappLink.issueLinkCode(await requireActor(request))));
+
+route("DELETE", "/api/me/phone", async ({ request }) => json(await whatsappLink.unlinkPhone(await requireActor(request))));
+
+/** Вебхук Whapi: адрес с ключом из «Подключений». Сессия не нужна, origin не проверяется (сервер-сервер). */
+route("POST", "/api/whapi/webhook/:key", async ({ request, params }) => json(await whatsappInbound.handleWebhook(params.key!, request)));
 
 // ---------- Помощник ----------
 

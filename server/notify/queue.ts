@@ -215,7 +215,8 @@ export function nextAllowedAt(at: number, prefs: Prefs, tz: string, workDays: nu
   return t;
 }
 
-async function siteOrigin(): Promise<string> {
+/** Адрес сайта, запомненный по запросам к нему (для ссылок в WhatsApp и push). */
+export async function rememberedOrigin(): Promise<string> {
   const row = await getDb().query.settings.findFirst({
     where: and(eq(schema.settings.scope, "company"), eq(schema.settings.scopeId, "system"), eq(schema.settings.key, "origin")),
   });
@@ -255,7 +256,7 @@ async function deliver(d: Delivery): Promise<{ status: "sent" | "cancelled" | "r
   const prefs = await loadPrefs(d.userId);
   const allowedAt = nextAllowedAt(Date.now(), prefs, actor.company.timezone, actor.settings.workDays);
   if (allowedAt > Date.now() + 1000) return { status: "later", at: allowedAt };
-  const origin = await siteOrigin();
+  const origin = await rememberedOrigin();
   const link = d.url && origin ? `${origin}${d.url}` : "";
 
   if (d.channel === "whatsapp") {

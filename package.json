@@ -20,7 +20,8 @@
     "db:reset:local": "node scripts/reset-local.mjs",
     "smoke:tasks": "node scripts/smoke-tasks.mjs",
     "smoke:assistant": "node scripts/smoke-assistant.mjs",
-    "smoke:all": "bash scripts/smoke-all.sh"
+    "smoke:all": "bash scripts/smoke-all.sh",
+    "smoke:whatsapp": "node scripts/smoke-whatsapp.mjs"
   },
   "dependencies": {
     "class-variance-authority": "0.7.1",

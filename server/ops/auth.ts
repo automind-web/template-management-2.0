@@ -10,6 +10,7 @@ import { dummyVerify, hashPassword, verifyPassword } from "../password";
 import { assertCanResetPassword } from "../permissions";
 import { createSession, revokeAllSessions, revokeSession } from "../session";
 import { assertNotLocked, clearFailures, registerFailure } from "../throttle";
+import { sendWhatsAppText, whapiConfigured } from "../whatsapp/whapi";
 import { displayNameSchema, passwordSchema } from "./invites";
 
 export const loginInputSchema = z.object({
@@ -127,11 +128,34 @@ export async function checkResetLink(token: string) {
 
 /**
  * Запрос кода восстановления в WhatsApp. Ответ всегда одинаковый, чтобы не раскрывать,
- * существует ли логин и привязан ли номер. Отправка кода — на этапе подключения WhatsApp.
+ * существует ли логин и привязан ли номер. Код отправляется только на подтверждённый номер.
  */
 export async function requestRecoveryCode(login: string) {
   const key = `recover:${login}`;
   await assertNotLocked(key);
+  const db = getDb();
+  const user = await db.query.users.findFirst({ where: eq(schema.users.login, login) });
+  if (!user?.phone || !user.phoneVerifiedAt || user.disabledAt || !whapiConfigured()) return { ok: true };
+  const now = Date.now();
+  // Не чаще раза в минуту на участника.
+  const recent = await db.query.passwordResets.findFirst({
+    where: and(eq(schema.passwordResets.userId, user.id), eq(schema.passwordResets.channel, "whatsapp"), gt(schema.passwordResets.createdAt, now - 60_000)),
+  });
+  if (recent) return { ok: true };
+  await db
+    .update(schema.passwordResets)
+    .set({ revokedAt: now })
+    .where(and(eq(schema.passwordResets.userId, user.id), eq(schema.passwordResets.channel, "whatsapp"), isNull(schema.passwordResets.usedAt), isNull(schema.passwordResets.revokedAt)));
+  const code = String(crypto.getRandomValues(new Uint32Array(1))[0]! % 1_000_000).padStart(6, "0");
+  await db.insert(schema.passwordResets).values({
+    id: newId(),
+    userId: user.id,
+    codeHash: await sha256Hex(code),
+    channel: "whatsapp",
+    expiresAt: now + 15 * 60_000,
+    createdAt: now,
+  });
+  await sendWhatsAppText(user.phone, `Код для восстановления пароля: ${code}. Действует 15 минут. Если вы не запрашивали код — проигнорируйте сообщение.`).catch(() => null);
   return { ok: true };
 }
 

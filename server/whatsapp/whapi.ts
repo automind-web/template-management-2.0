@@ -4,7 +4,10 @@
  */
 import { getEnv } from "../env";
 
-const API = "https://gate.whapi.cloud";
+/** Адрес API Whapi. WHAPI_API_URL (не секрет) — только для тестового окружения с заглушкой. */
+function api(): string {
+  return (getEnv().WHAPI_API_URL || "https://gate.whapi.cloud").replace(/\/$/, "");
+}
 
 export function whapiConfigured(): boolean {
   return Boolean(getEnv().WHAPI_TOKEN?.trim());
@@ -21,19 +24,19 @@ export function normalizePhone(value: string): string {
 
 export async function sendWhatsAppText(to: string, body: string): Promise<{ ok: boolean; status: number }> {
   if (!whapiConfigured()) return { ok: false, status: 0 };
-  const res = await fetch(`${API}/messages/text`, {
+  const res = await fetch(`${api()}/messages/text`, {
     method: "POST",
     headers: headers(),
     body: JSON.stringify({ to: normalizePhone(to), body: body.slice(0, 4000) }),
-  });
-  return { ok: res.ok, status: res.status };
+  }).catch(() => null);
+  return { ok: Boolean(res?.ok), status: res?.status ?? 0 };
 }
 
 /** Реальное состояние канала для «Подключений». */
 export async function whapiHealth(): Promise<{ ok: boolean; status: string; phone: string | null }> {
   if (!whapiConfigured()) return { ok: false, status: "missing_secret", phone: null };
   try {
-    const res = await fetch(`${API}/health`, { headers: headers() });
+    const res = await fetch(`${api()}/health`, { headers: headers() });
     if (res.status === 401 || res.status === 403) return { ok: false, status: "unauthorized", phone: null };
     if (!res.ok) return { ok: false, status: `http_${res.status}`, phone: null };
     const data = (await res.json().catch(() => null)) as { status?: { text?: string }; user?: { id?: string } } | null;
@@ -50,4 +53,8 @@ export async function webhookKey(): Promise<string | null> {
   if (!token) return null;
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`am-webhook:${token}`));
   return Array.from(new Uint8Array(digest).slice(0, 16), (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+export function mediaUrl(id: string): string {
+  return `${api()}/media/${encodeURIComponent(id)}`;
 }

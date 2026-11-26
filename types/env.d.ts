@@ -39,6 +39,8 @@ interface AppEnv {
   ASSETS?: { fetch(request: Request): Promise<Response> };
   OWNER_ACTIVATION_CODE?: string;
   WHAPI_TOKEN?: string;
+  /** Не секрет: адрес API Whapi для тестового окружения (по умолчанию gate.whapi.cloud). */
+  WHAPI_API_URL?: string;
   OPENAI_API_KEY?: string;
   VAPID_PUBLIC_KEY?: string;
   VAPID_PRIVATE_KEY?: string;

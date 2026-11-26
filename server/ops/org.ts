@@ -19,6 +19,7 @@ import {
 import { revokeAllSessions } from "../session";
 import { ASSISTANT_MODELS, companySettingsSchema, saveSettings } from "../settings";
 import { dueMomentInZone, isValidTimeZone } from "../time";
+import { whapiHealth, webhookKey } from "../whatsapp/whapi";
 import { seedWorkflow } from "./setup";
 
 // ---------- Текущий участник ----------
@@ -326,18 +327,32 @@ export async function updateMember(actor: Actor, userId: string, input: z.infer<
 // ---------- Подключения ----------
 
 /** Реальное состояние подключений. Возвращается только факт наличия секретов, не значения. */
-export async function connections(actor: Actor) {
+export async function connections(actor: Actor, origin: string) {
   assertManagerOrDirector(actor);
   if (!isDirector(actor)) throw forbidden();
   const env = getEnv();
   const push = hasSecret("VAPID_PUBLIC_KEY") && hasSecret("VAPID_PRIVATE_KEY");
+  const health = await whapiHealth();
+  const key = await webhookKey();
   return {
-    whapi: { ok: false, configured: hasSecret("WHAPI_TOKEN") },
-    openai: { ok: hasSecret("OPENAI_API_KEY"), configured: hasSecret("OPENAI_API_KEY") },
+    whapi: {
+      ok: health.ok,
+      configured: hasSecret("WHAPI_TOKEN"),
+      status: health.status,
+      channelPhone: health.phone,
+      workNumber: actor.settings.whapiPhone,
+      webhookUrl: key ? `${origin}/api/whapi/webhook/${key}` : null,
+    },
+    openai: { ok: hasSecret("OPENAI_API_KEY"), configured: hasSecret("OPENAI_API_KEY"), model: actor.settings.assistantModel },
     push: { ok: push, configured: push },
     files: { ok: Boolean(env.BUCKET), configured: Boolean(env.BUCKET) },
-    db: { ok: Boolean(env.DB) },
   };
 }
 
+export const whatsappSettingsSchema = z.object({ workNumber: z.string().trim().max(20) });
 
+export async function updateWhatsappSettings(actor: Actor, input: z.infer<typeof whatsappSettingsSchema>) {
+  assertDirector(actor);
+  await saveSettings(actor.company.id, { whapiPhone: input.workNumber.replaceAll(/\D/g, "") }, actor.user.id);
+  return { ok: true };
+}

@@ -23,6 +23,8 @@ export const companySettingsSchema = z.object({
   cancelledName: z.string().trim().min(1, "required").max(40),
   assistantName: z.string().trim().min(1, "required").max(40),
   assistantModel: z.enum(ASSISTANT_MODELS),
+  /** Рабочий номер WhatsApp компании (подсказка сотрудникам при привязке номера). */
+  whapiPhone: z.string().regex(/^\d{0,15}$/, "phone_invalid"),
 });
 
 export type CompanySettings = z.infer<typeof companySettingsSchema>;
@@ -39,6 +41,7 @@ export const DEFAULT_SETTINGS: CompanySettings = {
   cancelledName: "Отменена",
   assistantName: companyConfig.assistant.name,
   assistantModel: companyConfig.assistant.defaultModel as CompanySettings["assistantModel"],
+  whapiPhone: "",
 };
 
 const KEY = "company";

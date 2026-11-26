@@ -3,6 +3,7 @@
 import Link from "next/link";
 import * as React from "react";
 import { useCabinet } from "@/components/cabinet/cabinet-context";
+import { WhatsappSection } from "@/components/cabinet/whatsapp-section";
 import { PageBody, PageHeader } from "@/components/cabinet/page-header";
 import { useSubmit } from "@/components/forms";
 import { Button } from "@/components/ui/button";
@@ -24,16 +25,7 @@ export default function ProfilePage() {
       <PageHeader title={t("profile.title")} />
       <PageBody className="flex max-w-3xl flex-col gap-4">
         <PersonalSection />
-        <Section title="WhatsApp">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <StateDot ok={me.user.phoneLinked}>
-              {me.user.phoneLinked ? t("profile.phoneLinked", { phone: me.user.phoneMasked ?? "" }) : t("profile.phoneNotLinked")}
-            </StateDot>
-            <Button variant="outline" disabled title={t("profile.phoneSoon")}>
-              {t("profile.linkPhone")}
-            </Button>
-          </div>
-        </Section>
+        <WhatsappSection />
         <PasswordSection />
         <SessionsSection />
         <Section>
