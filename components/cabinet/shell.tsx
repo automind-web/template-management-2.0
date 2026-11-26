@@ -4,20 +4,40 @@ import { BarChart3, Bell, ListTodo, MessageCircle, Settings, UserRound } from "l
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import * as React from "react";
+import { api } from "@/lib/api";
 import { t } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { useCabinet } from "./cabinet-context";
 import { HotkeysHelp } from "./hotkeys-help";
 
-type NavItem = { href: string; label: string; short?: string; icon: React.ComponentType<{ className?: string }> };
+type NavItem = { href: string; label: string; short?: string; badge?: number; icon: React.ComponentType<{ className?: string }> };
 
-function useNav() {
+/** Непрочитанные уведомления: обновляются при переходах и раз в минуту. */
+function useUnread(pathname: string) {
+  const [unread, setUnread] = React.useState(0);
+  React.useEffect(() => {
+    let alive = true;
+    const load = () =>
+      api<{ unread: number }>("GET", "/api/notifications/count")
+        .then((r) => alive && setUnread(r.unread))
+        .catch(() => {});
+    void load();
+    const timer = window.setInterval(load, 60_000);
+    return () => {
+      alive = false;
+      window.clearInterval(timer);
+    };
+  }, [pathname]);
+  return unread;
+}
+
+function useNav(unread: number) {
   const { me } = useCabinet();
   const main: NavItem[] = [
     { href: "/tasks", label: t("nav.tasks"), icon: ListTodo },
     { href: "/assistant", label: t("nav.assistant"), short: t("nav.assistantShort"), icon: MessageCircle },
     ...(me.capabilities.viewStats ? [{ href: "/stats", label: t("nav.stats"), icon: BarChart3 }] : []),
-    { href: "/notifications", label: t("nav.notifications"), icon: Bell },
+    { href: "/notifications", label: t("nav.notifications"), icon: Bell, badge: unread },
   ];
   const bottom: NavItem[] = [
     ...(me.capabilities.viewSystemSettings ? [{ href: "/settings", label: t("nav.settings"), icon: Settings }] : []),
@@ -42,7 +62,7 @@ export function CompanyMark({ name, logoUrl }: { name: string; logoUrl: string }
 
 export function CabinetShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname() ?? "/";
-  const { main, bottom } = useNav();
+  const { main, bottom } = useNav(useUnread(pathname));
   const { me } = useCabinet();
 
   return (
@@ -92,7 +112,10 @@ export function CabinetShell({ children }: { children: React.ReactNode }) {
                     active ? "text-primary" : "text-foreground/60",
                   )}
                 >
-                  <Icon className="size-5" />
+                  <span className="relative">
+                    <Icon className="size-5" />
+                    {item.badge ? <Badge n={item.badge} className="absolute -right-2.5 -top-1.5" /> : null}
+                  </span>
                   <span className="max-w-full truncate">{item.short ?? item.label}</span>
                 </Link>
               </li>
@@ -116,7 +139,17 @@ function SideLink({ item, active }: { item: NavItem; active: boolean }) {
       )}
     >
       <Icon className="size-[18px] shrink-0 text-foreground/70" />
-      <span>{item.label}</span>
+      <span className="flex-1">{item.label}</span>
+      {item.badge ? <Badge n={item.badge} /> : null}
     </Link>
+  );
+}
+
+function Badge({ n, className }: { n: number; className?: string }) {
+  return (
+    <span className={cn("inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-primary px-1.5 text-[11px] font-bold text-primary-foreground", className)}>
+      <span className="sr-only">{t("notifications.unread")}: </span>
+      {n > 99 ? "99+" : n}
+    </span>
   );
 }

@@ -2,6 +2,7 @@
  * Единый серверный слой операций для сайта (а позже — веб-помощника, WhatsApp и плагина директора).
  * Каждая операция получает Actor, загруженный из БД на этот запрос, и сама проверяет права.
  */
+import { and, eq } from "drizzle-orm";
 import { requireActor, sessionTokenFromRequest, loadActorByToken } from "./context";
 import { AppError, notFound } from "./errors";
 import { assertSameOrigin, clearSessionCookie, errorResponse, json, publicOrigin, readJson, sessionCookie } from "./http";
@@ -10,6 +11,12 @@ import * as invites from "./ops/invites";
 import * as org from "./ops/org";
 import * as setup from "./ops/setup";
 import * as system from "./ops/system";
+import * as notify from "./notify/queue";
+import { loadPrefs, prefsSchema, savePrefs } from "./notify/prefs";
+import { getEnv } from "./env";
+import { whapiConfigured } from "./whatsapp/whapi";
+import { getDb, schema } from "./db";
+import { newId } from "./crypto";
 import * as stats from "./ops/stats";
 import * as tasks from "./ops/tasks";
 import { resolveBranch } from "./permissions";
@@ -262,6 +269,69 @@ route("GET", "/api/attachments/:id", async ({ request, params }) =>
 route("DELETE", "/api/attachments/:id", async ({ request, params }) =>
   json(await tasks.deleteAttachment(await requireActor(request), params.id!)),
 );
+
+// ---------- Уведомления и push ----------
+
+route("GET", "/api/notifications", async ({ request }) => {
+  const actor = await requireActor(request);
+  const env = getEnv();
+  return json({
+    ...(await notify.inbox(actor)),
+    prefs: await loadPrefs(actor.user.id),
+    workDays: actor.settings.workDays,
+    channels: {
+      whatsapp: { linked: Boolean(actor.user.phoneVerifiedAt), configured: whapiConfigured() },
+      push: { configured: Boolean(env.VAPID_PUBLIC_KEY && env.VAPID_PRIVATE_KEY), vapidPublicKey: env.VAPID_PUBLIC_KEY ?? null },
+    },
+  });
+});
+
+route("GET", "/api/notifications/count", async ({ request }) => json({ unread: await notify.unreadCount(await requireActor(request)) }));
+
+route("POST", "/api/notifications/read", async ({ request }) => {
+  const actor = await requireActor(request);
+  const input = await readJson(request, z.object({ ids: z.array(z.string().max(80)).max(100).optional(), all: z.boolean().optional() }));
+  return json(await notify.markRead(actor, input.all ? "all" : (input.ids ?? [])));
+});
+
+route("PATCH", "/api/notifications/prefs", async ({ request }) => {
+  const actor = await requireActor(request);
+  const prefs = await readJson(request, prefsSchema);
+  await savePrefs(actor.user.id, prefs);
+  await notify.afterPrefsChange(actor);
+  return json({ ok: true });
+});
+
+/** Подписка push привязана к сессии: после выхода доставка на это устройство прекращается. */
+route("POST", "/api/push/subscribe", async ({ request }) => {
+  const actor = await requireActor(request);
+  const input = await readJson(
+    request,
+    z.object({
+      endpoint: z.string().url().startsWith("https://").max(1000),
+      keys: z.object({ p256dh: z.string().min(20).max(200), auth: z.string().min(8).max(100) }),
+    }),
+  );
+  const now = Date.now();
+  await getDb()
+    .insert(schema.pushSubscriptions)
+    .values({ id: newId(), userId: actor.user.id, sessionId: actor.session.id, endpoint: input.endpoint, p256dh: input.keys.p256dh, auth: input.keys.auth, createdAt: now })
+    .onConflictDoUpdate({
+      target: schema.pushSubscriptions.endpoint,
+      set: { userId: actor.user.id, sessionId: actor.session.id, p256dh: input.keys.p256dh, auth: input.keys.auth, revokedAt: null },
+    });
+  return json({ ok: true });
+});
+
+route("POST", "/api/push/unsubscribe", async ({ request }) => {
+  const actor = await requireActor(request);
+  const input = await readJson(request, z.object({ endpoint: z.string().max(1000) }));
+  await getDb()
+    .update(schema.pushSubscriptions)
+    .set({ revokedAt: Date.now() })
+    .where(and(eq(schema.pushSubscriptions.endpoint, input.endpoint), eq(schema.pushSubscriptions.userId, actor.user.id)));
+  return json({ ok: true });
+});
 
 // ---------- Статистика ----------
 

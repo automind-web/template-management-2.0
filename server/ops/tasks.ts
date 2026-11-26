@@ -15,6 +15,7 @@ import { getEnv } from "../env";
 import { AppError, forbidden, notFound } from "../errors";
 import { isDirector, isManager, resolveBranch, resolveBranchScope } from "../permissions";
 import { dateInZone, dueMomentInZone, timeInZone } from "../time";
+import { afterTaskChange, notifyTask } from "../notify/queue";
 import { actorRoles, allowedTransitions, loadWorkflow, type Transition, type Workflow } from "../workflow";
 
 type TaskRow = typeof schema.tasks.$inferSelect;
@@ -251,6 +252,8 @@ export async function createTask(actor: Actor, input: z.infer<typeof createTaskS
             event(row, actor, { type: "assigned", field: "assigneeId", oldValue: null, newValue: assigneeId }, input.opId),
           ),
         ]);
+        await notifyTask(actor, row.id, "assigned", input.opId ?? row.id);
+        await afterTaskChange(row.id);
         return { taskId: row.id };
       } catch (error) {
         const msg = error instanceof Error ? `${error.message} ${String(error.cause ?? "")}` : "";
@@ -357,6 +360,8 @@ export async function updateTask(actor: Actor, taskId: string, input: z.infer<ty
     patch.searchText = searchTextOf(merged);
     const updated = await updateVersioned(task, input.version, patch);
     await insertEvents(events.map((e) => event(updated, actor, e, input.opId)));
+    if (patch.assigneeId) await notifyTask(actor, task.id, "assigned", `${updated.version}`);
+    if (patch.assigneeId || patch.dueAt !== undefined) await afterTaskChange(task.id);
     return { taskId: task.id };
   });
 }
@@ -454,6 +459,10 @@ export async function changeStatus(actor: Actor, taskId: string, input: z.infer<
       );
     }
     await db.batch(writes as [typeof writes[number], ...typeof writes]);
+    if (type === "submitted" || type === "returned" || type === "accepted") {
+      await notifyTask(actor, task.id, type, `${updated.version}`, type === "returned" ? comment : result);
+    }
+    await afterTaskChange(task.id);
     return { taskId: task.id };
   });
 }
@@ -475,6 +484,7 @@ export async function setCancelled(actor: Actor, taskId: string, cancelled: bool
     }
     const updated = await updateVersioned(task, input.version, { cancelledAt: cancelled ? Date.now() : null });
     await insertEvents([event(updated, actor, { type: cancelled ? "cancelled" : "restored", comment: input.comment || null }, input.opId)]);
+    await afterTaskChange(task.id);
     return { taskId: task.id };
   });
 }
@@ -496,6 +506,7 @@ export async function addComment(actor: Actor, taskId: string, input: z.infer<ty
       opId: input.opId ?? null,
       createdAt: Date.now(),
     });
+    await notifyTask(actor, task.id, "comment", id, input.body);
     return { taskId: task.id, commentId: id };
   });
 }

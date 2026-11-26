@@ -89,3 +89,18 @@ export async function requireActor(request: Request): Promise<Actor> {
   if (!actor) throw unauthorized();
   return actor;
 }
+
+/**
+ * Участник без веб-сессии: фоновая доставка уведомлений, WhatsApp.
+ * Права читаются из БД так же, как для сайта. null — доступа нет.
+ */
+export async function loadActorForUser(userId: string, channel: Actor["channel"]): Promise<Actor | null> {
+  const now = Date.now();
+  const session: SessionRow = { id: "", tokenHash: "", userId, userAgent: null, createdAt: now, lastSeenAt: now, expiresAt: now, revokedAt: null };
+  try {
+    const actor = await loadActorForSession(session);
+    return actor ? { ...actor, channel } : null;
+  } catch {
+    return null;
+  }
+}

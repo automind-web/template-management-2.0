@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { api } from "@/lib/api";
+import { registerServiceWorker } from "@/lib/pwa";
 
 export type Me = {
   user: { id: string; login: string; displayName: string; phoneLinked: boolean; phoneMasked: string | null };
@@ -69,6 +70,10 @@ export function CabinetProvider({ initialMe, children }: { initialMe: Me; childr
   const [me, setMe] = React.useState(initialMe);
   const [branchId, setBranch] = React.useState<string | null>(() => pickBranch(initialMe, null));
   const [branchEpoch, setEpoch] = React.useState(0);
+
+  React.useEffect(() => {
+    void registerServiceWorker();
+  }, []);
 
   // Выбор филиала восстанавливается после загрузки (localStorage доступен только в браузере).
   React.useEffect(() => {

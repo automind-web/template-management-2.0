@@ -13,6 +13,7 @@ import { companyConfig } from "@/config/company";
 import { api } from "@/lib/api";
 import { formatShortDateTime } from "@/lib/format";
 import { t } from "@/lib/i18n";
+import { logout } from "@/lib/pwa";
 
 type SessionInfo = { id: string; userAgent: string | null; lastSeenAt: number; current: boolean };
 
@@ -46,10 +47,7 @@ export default function ProfilePage() {
             )}
             <Button
               variant="danger"
-              onClick={async () => {
-                await api("POST", "/api/auth/logout", {}, { redirectOn401: false }).catch(() => {});
-                window.location.assign("/login?reason=logout");
-              }}
+              onClick={() => void logout()}
             >
               {t("profile.logout")}
             </Button>
