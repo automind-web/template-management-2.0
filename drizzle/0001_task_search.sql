@@ -1,0 +1,1 @@
+ALTER TABLE `tasks` ADD `search_text` text DEFAULT '' NOT NULL;

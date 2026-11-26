@@ -32,7 +32,7 @@ Drizzle ORM, файлы в **R2**. Собирается в Cloudflare Worker `di
 
 ## Миграции
 
-- Файлы: `drizzle/0000_init.sql`, … (порядок — `drizzle/meta/_journal.json`).
+- Файлы: `drizzle/0000_init.sql`, `drizzle/0001_task_search.sql`, … (порядок — `drizzle/meta/_journal.json`).
 - Сборка копирует их в `dist/.openai/drizzle/`; Sites применяет их к D1 **по порядку, до** того как новая версия получит трафик.
 - Новая компания стартует с **чистой БД**: миграции создают только схему, без примеров и тестовых аккаунтов.
 - Схема меняется **только новыми миграциями** (`npm run db:generate -- --name <описание>`). Применённые файлы не редактировать: откат версии возвращает код, но не данные.
@@ -68,7 +68,7 @@ Drizzle ORM, файлы в **R2**. Собирается в Cloudflare Worker `di
 
 ## Проверка после публикации
 
-- `GET /api/health` → `{"ok":true,"build":"0.1.0","schema":"0000_init","bindings":{"db":true,"bucket":true}}`
+- `GET /api/health` → `{"ok":true,"build":"0.2.0","schema":"0001_task_search","bindings":{"db":true,"bucket":true}}`
 - Чистый браузер открывает адрес сайта → форма входа кабинета.
 
 ## Локальная разработка
@@ -86,4 +86,5 @@ npm run dev                          # http://localhost:5173
 | `npm run db:check` | Применяет все миграции к пустой SQLite в памяти, проверяет чистый старт |
 | `npm test` | Юнит-тесты (пароли, сроки по часовому поясу) |
 | `npm run smoke` | Сквозной сценарий этапа 1 на запущенном сервере (**только тестовая БД**) |
+| `npm run smoke:tasks` | Сквозной сценарий этапа 2 (задачи); запускать после `npm run smoke` |
 | `npm run db:reset:local` | Пересоздаёт локальную D1 разработки |
