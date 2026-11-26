@@ -853,6 +853,11 @@ export async function listTasks(actor: Actor, query: z.infer<typeof listQuerySch
       cancelled: Boolean(r.cancelledAt),
       checklist: { total: checklist.length, done: checklist.filter((c) => c.done).length },
       version: r.version,
+      /** Куда участник может перенести задачу (подсветка колонок канбана). */
+      moves: allowedTransitions(actor, r, wf).map((t) => ({
+        to: t.to,
+        needsForm: Boolean(t.requires.comment || t.requires.result),
+      })),
     };
   });
 

@@ -15,6 +15,7 @@ export type TaskListItem = {
   cancelled: boolean;
   checklist: { total: number; done: number };
   version: number;
+  moves: { to: string; needsForm: boolean }[];
 };
 
 export type TaskList = {

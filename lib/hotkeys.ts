@@ -41,3 +41,15 @@ export function useSlashToFocus(ref: React.RefObject<HTMLInputElement | null>) {
     return () => window.removeEventListener("keydown", onKey);
   }, [ref]);
 }
+
+/** Единый список сочетаний: из него строится подсказка (обработчики — выше и в Radix для Esc/Tab). */
+export function hotkeyList(mac: boolean) {
+  return [
+    { keys: "Tab / Shift+Tab", action: "hotkeys.focus", where: "hotkeys.everywhere" },
+    { keys: mac ? "Return" : "Enter", action: "hotkeys.open", where: "hotkeys.onItem" },
+    { keys: "/", action: "hotkeys.search", where: "hotkeys.onList" },
+    { keys: mac ? "⌘+Return" : "Ctrl+Enter", action: "hotkeys.save", where: "hotkeys.inForm" },
+    { keys: "Esc", action: "hotkeys.close", where: "hotkeys.inDialog" },
+    { keys: "?", action: "hotkeys.help", where: "hotkeys.everywhere" },
+  ] as const;
+}

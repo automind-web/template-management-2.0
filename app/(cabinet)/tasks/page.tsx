@@ -494,39 +494,174 @@ function TaskTable({ data, onOpen }: { data: TaskList; onOpen: () => void }) {
   );
 }
 
-/** Канбан: колонки по статусам из той же выдачи. Переходы — через меню «…» карточки (на телефоне и с клавиатуры тоже). */
+type DropState = { taskId: string; to: string } | null;
+
+/**
+ * Канбан: колонки по статусам из той же выдачи, что и список.
+ * Перетаскивание (мышь): подсвечиваются доступные колонки и место переноса; успех — только после ответа сервера,
+ * при отказе карточка остаётся на месте с объяснением. Если нужен результат или комментарий — та же форма,
+ * что в меню «Изменить статус». На телефоне и с клавиатуры все переходы — через меню «…» карточки.
+ */
 function Board({ data, onOpen, onChanged }: { data: TaskList; onOpen: () => void; onChanged: () => void }) {
   const items = data.items.filter((i) => !i.cancelled);
+  const [dragging, setDragging] = React.useState<TaskListItem | null>(null);
+  const [over, setOver] = React.useState<string | null>(null);
+  const [pending, setPending] = React.useState<DropState>(null);
+  const [message, setMessage] = React.useState<{ tone: "danger" | "success"; text: string } | null>(null);
+  const [formFor, setFormFor] = React.useState<{ card: TaskCard; transition: TransitionInfo } | null>(null);
+  const act = useTaskAction((c) => setFormFor((f) => (f ? { ...f, card: c } : f)));
+
+  const allowed = (task: TaskListItem | null, key: string) => Boolean(task?.moves.some((m) => m.to === key));
+
+  const drop = async (task: TaskListItem, to: string) => {
+    setOver(null);
+    setDragging(null);
+    if (task.status.key === to) return;
+    const move = task.moves.find((m) => m.to === to);
+    if (!move) {
+      setMessage({ tone: "danger", text: t("tasks.board.forbidden") });
+      return;
+    }
+    setMessage(null);
+    if (move.needsForm) {
+      // Нужен результат или комментарий — открывается та же форма, что и в меню карточки.
+      try {
+        const card = await api<TaskCard>("GET", `/api/tasks/${task.id}`);
+        const transition = card.transitions.find((tr) => tr.to === to);
+        if (!transition) throw new ApiError("transition_forbidden", 403, null);
+        setFormFor({ card, transition });
+      } catch (e) {
+        setMessage({ tone: "danger", text: errorText(e instanceof ApiError ? e.code : "network") });
+        onChanged();
+      }
+      return;
+    }
+    setPending({ taskId: task.id, to });
+    try {
+      await act("POST", `/api/tasks/${task.id}/status`, { to }, task.version);
+      setMessage({ tone: "success", text: t("tasks.board.moved", { title: task.title, status: data.statuses.find((s) => s.key === to)?.name ?? to }) });
+    } catch (e) {
+      setMessage({ tone: "danger", text: errorText(e instanceof ApiError ? e.code : "network") });
+    } finally {
+      setPending(null);
+      onChanged();
+    }
+  };
+
   return (
-    <div className="-mx-4 overflow-x-auto px-4 pb-2 sm:mx-0 sm:px-0">
-      <div className="grid min-w-[880px] items-start gap-3" style={{ gridTemplateColumns: `repeat(${data.statuses.length}, minmax(200px, 1fr))` }}>
-        {data.statuses.map((s) => {
-          const col = items.filter((i) => i.status.key === s.key);
-          return (
-            <section key={s.key} aria-label={s.name} className="rounded-xl border border-border bg-muted/50 p-2">
-              <h2 className="flex items-center gap-2 px-1.5 pb-2 pt-1 text-[15px] font-bold">
-                {s.name} <span className="font-semibold text-muted-foreground">{col.length}</span>
-              </h2>
-              {col.length === 0 ? (
-                <p className="py-6 text-center text-sm text-muted-foreground">{t("tasks.board.empty")}</p>
-              ) : (
+    <div className="flex flex-col gap-3">
+      {message ? (
+        <p role={message.tone === "danger" ? "alert" : "status"} className={cn("text-sm font-semibold", message.tone === "danger" ? "text-destructive" : "text-success")}>
+          {message.text}
+        </p>
+      ) : null}
+      <div className="-mx-4 overflow-x-auto px-4 pb-2 sm:mx-0 sm:px-0">
+        <div className="grid min-w-[880px] items-start gap-3" style={{ gridTemplateColumns: `repeat(${data.statuses.length}, minmax(200px, 1fr))` }}>
+          {data.statuses.map((s) => {
+            const col = items.filter((i) => (pending?.taskId === i.id ? pending.to : i.status.key) === s.key);
+            const canDrop = dragging ? allowed(dragging, s.key) : false;
+            const isSource = dragging?.status.key === s.key;
+            return (
+              <section
+                key={s.key}
+                aria-label={s.name}
+                onDragOver={(e) => {
+                  if (!dragging || !canDrop) return;
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = "move";
+                  if (over !== s.key) setOver(s.key);
+                }}
+                onDragLeave={(e) => {
+                  if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setOver((o) => (o === s.key ? null : o));
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  if (dragging) void drop(dragging, s.key);
+                }}
+                className={cn(
+                  "rounded-xl border p-2 transition-colors",
+                  dragging && canDrop ? "border-primary/50 bg-selected/60" : "border-border bg-muted/50",
+                  dragging && !canDrop && !isSource && "opacity-50",
+                  over === s.key && "border-primary bg-selected",
+                )}
+              >
+                <h2 className="flex items-center gap-2 px-1.5 pb-2 pt-1 text-[15px] font-bold">
+                  {s.name} <span className="font-semibold text-muted-foreground">{col.length}</span>
+                </h2>
                 <ul className="flex flex-col gap-2">
                   {col.map((task) => (
                     <li key={task.id}>
-                      <BoardCard task={task} data={data} onOpen={onOpen} onChanged={onChanged} />
+                      <BoardCard
+                        task={task}
+                        data={data}
+                        onOpen={onOpen}
+                        onChanged={onChanged}
+                        pending={pending?.taskId === task.id}
+                        dragging={dragging?.id === task.id}
+                        onDragStart={() => {
+                          setMessage(null);
+                          setDragging(task);
+                        }}
+                        onDragEnd={() => {
+                          setDragging(null);
+                          setOver(null);
+                        }}
+                      />
                     </li>
                   ))}
+                  {over === s.key && dragging && dragging.status.key !== s.key ? (
+                    <li aria-hidden className="h-16 rounded-lg border-2 border-dashed border-primary/60 bg-surface/60" />
+                  ) : null}
                 </ul>
-              )}
-            </section>
-          );
-        })}
+                {col.length === 0 && over !== s.key ? <p className="py-6 text-center text-sm text-muted-foreground">{t("tasks.board.empty")}</p> : null}
+              </section>
+            );
+          })}
+        </div>
       </div>
+      {formFor ? (
+        <StatusDialog
+          card={formFor.card}
+          transition={formFor.transition}
+          open
+          onOpenChange={(o) => {
+            if (!o) {
+              setFormFor(null);
+              onChanged();
+            }
+          }}
+          act={act}
+          setCard={(c) => setFormFor((f) => (f ? { ...f, card: c } : f))}
+          onDone={(c) => {
+            setFormFor(null);
+            setMessage({ tone: "success", text: t("tasks.board.moved", { title: c.task.title, status: c.task.status.name }) });
+            onChanged();
+          }}
+        />
+      ) : null}
     </div>
   );
 }
 
-function BoardCard({ task, data, onOpen, onChanged }: { task: TaskListItem; data: TaskList; onOpen: () => void; onChanged: () => void }) {
+function BoardCard({
+  task,
+  data,
+  onOpen,
+  onChanged,
+  pending,
+  dragging,
+  onDragStart,
+  onDragEnd,
+}: {
+  task: TaskListItem;
+  data: TaskList;
+  onOpen: () => void;
+  onChanged: () => void;
+  pending: boolean;
+  dragging: boolean;
+  onDragStart: () => void;
+  onDragEnd: () => void;
+}) {
   const [card, setCard] = React.useState<TaskCard | null>(null);
   const [dialog, setDialog] = React.useState<TransitionInfo | null>(null);
   const [error, setError] = React.useState<string | null>(null);
@@ -550,24 +685,36 @@ function BoardCard({ task, data, onOpen, onChanged }: { task: TaskListItem; data
     }
     try {
       await act("POST", `/api/tasks/${task.id}/status`, { to: tr.to }, card.task.version);
-      onChanged();
     } catch (e) {
       setError(errorText(e instanceof ApiError ? e.code : "network"));
-      onChanged();
     }
+    onChanged();
   };
 
   return (
-    <Card className="relative p-3 shadow-sm">
+    <Card
+      draggable={task.moves.length > 0 && !pending}
+      onDragStart={(e) => {
+        e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.setData("text/plain", task.id);
+        onDragStart();
+      }}
+      onDragEnd={onDragEnd}
+      aria-busy={pending}
+      className={cn(
+        "relative p-3 shadow-sm",
+        task.moves.length > 0 && "cursor-grab active:cursor-grabbing",
+        dragging && "opacity-50 ring-2 ring-primary",
+        pending && "opacity-70",
+      )}
+    >
       <div className="flex items-start gap-2">
-        <Link href={`/tasks/${task.id}`} onClick={onOpen} className="min-w-0 flex-1 break-words font-semibold leading-snug after:absolute after:inset-0">
+        <Link href={`/tasks/${task.id}`} onClick={onOpen} draggable={false} className="min-w-0 flex-1 break-words font-semibold leading-snug after:absolute after:inset-0">
           {task.title}
         </Link>
+        {pending ? <Spinner className="relative z-10 mt-1 text-primary" /> : null}
         <DropdownMenu.Root onOpenChange={(o) => o && void loadCard()}>
-          <DropdownMenu.Trigger
-            className="relative z-10 -mr-1 -mt-0.5 rounded-md p-1 text-foreground/70 hover:bg-muted"
-            aria-label={`${t("tasks.board.menu")}: ${task.title}`}
-          >
+          <DropdownMenu.Trigger className="relative z-10 -mr-1 -mt-0.5 rounded-md p-1 text-foreground/70 hover:bg-muted" aria-label={`${t("tasks.board.menu")}: ${task.title}`}>
             <MoreHorizontal className="size-5" />
           </DropdownMenu.Trigger>
           <DropdownMenu.Portal>
@@ -587,11 +734,7 @@ function BoardCard({ task, data, onOpen, onChanged }: { task: TaskListItem; data
                 </div>
               ) : (
                 card.transitions.map((tr) => (
-                  <DropdownMenu.Item
-                    key={tr.to}
-                    onSelect={() => void run(tr)}
-                    className="cursor-pointer rounded-md px-2.5 py-2 text-sm outline-none data-[highlighted]:bg-muted"
-                  >
+                  <DropdownMenu.Item key={tr.to} onSelect={() => void run(tr)} className="cursor-pointer rounded-md px-2.5 py-2 text-sm outline-none data-[highlighted]:bg-muted">
                     {transitionLabel(tr, card.task.status.category)}
                   </DropdownMenu.Item>
                 ))
@@ -607,15 +750,7 @@ function BoardCard({ task, data, onOpen, onChanged }: { task: TaskListItem; data
       <DueText dueAt={task.dueAt} overdue={task.overdue} timeZone={data.timezone} className="mt-1 block" />
       {error ? <p className="relative z-10 mt-1 text-xs text-destructive">{error}</p> : null}
       {card ? (
-        <StatusDialog
-          card={card}
-          transition={dialog}
-          open={Boolean(dialog)}
-          onOpenChange={(o) => !o && setDialog(null)}
-          act={act}
-          setCard={setCard}
-          onDone={() => onChanged()}
-        />
+        <StatusDialog card={card} transition={dialog} open={Boolean(dialog)} onOpenChange={(o) => !o && setDialog(null)} act={act} setCard={setCard} onDone={() => onChanged()} />
       ) : null}
     </Card>
   );

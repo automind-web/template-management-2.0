@@ -7,6 +7,7 @@ import * as React from "react";
 import { t } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { useCabinet } from "./cabinet-context";
+import { HotkeysHelp } from "./hotkeys-help";
 
 type NavItem = { href: string; label: string; short?: string; icon: React.ComponentType<{ className?: string }> };
 
@@ -73,6 +74,7 @@ export function CabinetShell({ children }: { children: React.ReactNode }) {
       </aside>
 
       <div className="pb-20 md:pb-0">{children}</div>
+      <HotkeysHelp />
 
       {/* Телефон: нижняя панель с подписями. Настройки — из профиля. */}
       <nav aria-label={t("nav.main")} className="pb-safe fixed inset-x-0 bottom-0 z-30 border-t border-border bg-surface md:hidden">
