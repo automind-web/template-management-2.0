@@ -48,8 +48,6 @@ export const companyConfig = {
 
   auth: {
     sessionTtlDays: 30,
-    /** PBKDF2-SHA256. 100 000 — максимум, который разрешает Web Crypto в Cloudflare Workers. */
-    pbkdf2Iterations: 100_000,
     maxLoginFailures: 8,
     lockMinutes: 15,
     resetCodeTtlHours: 24,
@@ -60,8 +58,6 @@ export const companyConfig = {
   rules: {
     /** Видимость задач коллег своего филиала для сотрудника. */
     employeeSeesColleagues: false,
-    /** Соисполнение (несколько исполнителей). */
-    coExecution: false,
     /** Постановщик сохраняет доступ к задаче после передачи другому исполнителю. */
     creatorKeepsAccess: true,
     /** Приёмка результата руководителем. false — «Сдать» сразу завершает задачу. */
@@ -104,19 +100,19 @@ export const companyConfig = {
     { from: "done", to: "in_progress", actors: ["manager", "director"], requires: { comment: true } },
   ] satisfies TransitionConfig[],
 
-  /** Дополнительные поля задачи (хранятся в extra_json). */
-  extraFields: [] as { key: string; label: string; type: "text" | "number" | "date" }[],
 
   files: {
     /** Максимальный размер одного вложения, байт. */
     maxSize: 20 * 1024 * 1024,
   },
 
+  /** Значения по умолчанию; каждый участник меняет их в разделе «Уведомления». */
   notifications: {
-    /** За сколько часов до срока напоминать по умолчанию. */
-    remindBeforeHours: [24, 2],
+    /** За сколько минут до срока напоминать: 15, 60, 180, 1440, 4320. */
+    remindBeforeMinutes: [60, 1440],
+    /** Рабочие дни компании (1 — пн … 7 — вс); директор меняет в «Настройки системы → Компания». */
     workDays: [1, 2, 3, 4, 5],
-    quietHours: { from: "21:00", to: "08:00" },
+    quietHours: { enabled: true, from: "21:00", to: "08:00" },
   },
 
   assistant: {

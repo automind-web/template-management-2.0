@@ -1,6 +1,7 @@
 /** Личные настройки уведомлений участника (таблица settings, scope = user). */
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
+import { companyConfig } from "../../config/company";
 import { getDb, schema } from "../db";
 
 export const NOTIFY_EVENTS = ["assigned", "dueSoon", "overdue", "submitted", "returned", "accepted", "comment"] as const;
@@ -25,8 +26,8 @@ export type Prefs = z.infer<typeof prefsSchema>;
 export const DEFAULT_PREFS: Prefs = {
   channels: { whatsapp: false, push: false },
   events: { assigned: true, dueSoon: true, overdue: true, submitted: true, returned: true, accepted: true, comment: true },
-  remindBefore: [60, 1440],
-  quiet: { enabled: true, from: "21:00", to: "08:00" },
+  remindBefore: [...companyConfig.notifications.remindBeforeMinutes],
+  quiet: { ...companyConfig.notifications.quietHours },
   workDaysOnly: false,
   pausedUntil: null,
 };
