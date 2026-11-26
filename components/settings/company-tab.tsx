@@ -209,8 +209,8 @@ function CompanyForm({ data }: { data: Company }) {
         </div>
       </Section>
 
-      <div className="sticky bottom-20 z-10 flex justify-end md:bottom-4">
-        <Button type="submit" size="lg" disabled={pending || !dirty} className="shadow-lg">
+      <div className="sticky bottom-[calc(4rem+env(safe-area-inset-bottom))] z-10 -mx-4 flex justify-end border-t border-border bg-background/90 px-4 py-3 backdrop-blur sm:-mx-6 sm:px-6 md:bottom-0">
+        <Button type="submit" size="lg" disabled={pending || !dirty}>
           {pending ? <Spinner /> : null}
           {t("settings.saveChanges")}
         </Button>
