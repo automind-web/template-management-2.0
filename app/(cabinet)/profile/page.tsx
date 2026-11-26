@@ -1,71 +1,66 @@
 "use client";
 
-import { LogOut, Settings } from "lucide-react";
+import Link from "next/link";
 import * as React from "react";
 import { useCabinet } from "@/components/cabinet/cabinet-context";
-import { PageHeader } from "@/components/cabinet/page-header";
-import { LoadError, useSubmit } from "@/components/forms";
+import { PageBody, PageHeader } from "@/components/cabinet/page-header";
+import { useSubmit } from "@/components/forms";
 import { Button } from "@/components/ui/button";
-import { Alert, Card, CardContent, CardHeader, CardTitle, Spinner } from "@/components/ui/card";
+import { Alert, Meta, Section, Spinner, StateDot } from "@/components/ui/card";
 import { Field } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
+import { Input, Label } from "@/components/ui/input";
 import { companyConfig } from "@/config/company";
 import { api } from "@/lib/api";
-import { formatDateTime, t } from "@/lib/i18n";
+import { formatShortDateTime } from "@/lib/format";
+import { t } from "@/lib/i18n";
 
-type SessionInfo = { id: string; userAgent: string | null; createdAt: number; lastSeenAt: number; current: boolean };
+type SessionInfo = { id: string; userAgent: string | null; lastSeenAt: number; current: boolean };
 
 export default function ProfilePage() {
   const { me } = useCabinet();
   return (
     <>
-      <PageHeader
-        title={t("profile.title")}
-        actions={
-          me.capabilities.viewSystemSettings ? (
-            <Button asChild variant="outline">
-              <a href="/settings">
-                <Settings />
-                {t("profile.systemSettings")}
-              </a>
+      <PageHeader title={t("profile.title")} />
+      <PageBody className="flex max-w-3xl flex-col gap-4">
+        <PersonalSection />
+        <Section title="WhatsApp">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <StateDot ok={me.user.phoneLinked}>
+              {me.user.phoneLinked ? t("profile.phoneLinked", { phone: me.user.phoneMasked ?? "" }) : t("profile.phoneNotLinked")}
+            </StateDot>
+            <Button variant="outline" disabled title={t("profile.phoneSoon")}>
+              {t("profile.linkPhone")}
             </Button>
-          ) : null
-        }
-      />
-      <div className="grid gap-4 lg:grid-cols-2">
-        <PersonalCard />
-        <PasswordCard />
-        <SessionsCard />
-        <Card>
-          <CardContent className="pt-4 sm:pt-6">
+          </div>
+        </Section>
+        <PasswordSection />
+        <SessionsSection />
+        <Section>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            {me.capabilities.viewSystemSettings ? (
+              <Button asChild variant="outline">
+                <Link href="/settings">{t("nav.settings")}</Link>
+              </Button>
+            ) : (
+              <span />
+            )}
             <Button
-              variant="outline"
-              className="w-full"
+              variant="danger"
               onClick={async () => {
                 await api("POST", "/api/auth/logout", {}, { redirectOn401: false }).catch(() => {});
                 window.location.assign("/login?reason=logout");
               }}
             >
-              <LogOut />
               {t("profile.logout")}
             </Button>
-          </CardContent>
-        </Card>
-      </div>
+          </div>
+        </Section>
+      </PageBody>
     </>
   );
 }
 
-function Row({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <div className="flex flex-col gap-0.5 sm:flex-row sm:gap-4">
-      <dt className="w-32 shrink-0 text-sm text-muted-foreground">{label}</dt>
-      <dd className="min-w-0 break-words text-sm">{value}</dd>
-    </div>
-  );
-}
-
-function PersonalCard() {
+function PersonalSection() {
   const { me, refreshMe } = useCabinet();
   const [name, setName] = React.useState(me.user.displayName);
   const [saved, setSaved] = React.useState(false);
@@ -75,47 +70,47 @@ function PersonalCard() {
     setSaved(true);
   });
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{t("profile.personal")}</CardTitle>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-4">
-        <dl className="flex flex-col gap-2">
-          <Row label={t("profile.login")} value={me.user.login} />
-          <Row label={t("profile.company")} value={me.company.name} />
-          <Row label={t("profile.role")} value={t(`roles.${me.role}`)} />
-          <Row label={t("profile.branch")} value={me.role === "director" ? t("profile.branchAll") : (me.branch?.name ?? "—")} />
-          <Row
-            label={t("profile.phone")}
-            value={me.user.phoneLinked ? t("profile.phoneLinked", { phone: me.user.phoneMasked ?? "" }) : t("profile.phoneNotLinked")}
+    <Section title={t("profile.personal")}>
+      <dl className="mb-4 grid gap-x-6 gap-y-3 sm:grid-cols-2">
+        <Meta label={t("profile.company")}>{me.company.name}</Meta>
+        <Meta label={t("profile.role")}>{t(`roles.${me.role}`)}</Meta>
+        <Meta label={t("profile.branch")}>{me.role === "director" ? t("profile.branchAll") : (me.branch?.name ?? "—")}</Meta>
+        <Meta label={t("profile.login")}>{me.user.login}</Meta>
+      </dl>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          setSaved(false);
+          void run();
+        }}
+        className="flex flex-col gap-2"
+      >
+        {error ? <Alert tone="danger">{error}</Alert> : null}
+        <Label htmlFor="profile-name">{t("profile.displayName")}</Label>
+        <div className="flex gap-2">
+          <Input
+            id="profile-name"
+            value={name}
+            onChange={(e) => {
+              setName(e.target.value);
+              setSaved(false);
+            }}
+            required
+            maxLength={120}
+            autoComplete="name"
+            aria-invalid={Boolean(fieldErrors.displayName) || undefined}
           />
-        </dl>
-        <form
-          className="flex flex-col gap-3"
-          onSubmit={(e) => {
-            e.preventDefault();
-            setSaved(false);
-            void run();
-          }}
-        >
-          {error ? <Alert tone="danger">{error}</Alert> : null}
-          {saved ? <Alert tone="success">{t("profile.saved")}</Alert> : null}
-          <Field label={t("profile.displayName")} error={fieldErrors.displayName}>
-            <Input value={name} onChange={(e) => setName(e.target.value)} required maxLength={120} autoComplete="name" />
-          </Field>
-          <div>
-            <Button type="submit" disabled={pending || name.trim() === me.user.displayName}>
-              {pending ? <Spinner /> : null}
-              {t("app.save")}
-            </Button>
-          </div>
-        </form>
-      </CardContent>
-    </Card>
+          <Button type="submit" variant="outline" disabled={pending || name.trim() === me.user.displayName}>
+            {pending ? <Spinner /> : null}
+            {saved ? t("profile.saved") : t("app.save")}
+          </Button>
+        </div>
+      </form>
+    </Section>
   );
 }
 
-function PasswordCard() {
+function PasswordSection() {
   const [currentPassword, setCurrent] = React.useState("");
   const [newPassword, setNew] = React.useState("");
   const [done, setDone] = React.useState(false);
@@ -126,29 +121,22 @@ function PasswordCard() {
     setDone(true);
   });
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{t("profile.password")}</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <form
-          className="flex flex-col gap-3"
-          onSubmit={(e) => {
-            e.preventDefault();
-            setDone(false);
-            void run();
-          }}
-        >
-          {error ? <Alert tone="danger">{error}</Alert> : null}
-          {done ? <Alert tone="success">{t("profile.passwordChanged")}</Alert> : null}
+    <Section title={t("profile.password")}>
+      <form
+        className="flex flex-col gap-3"
+        onSubmit={(e) => {
+          e.preventDefault();
+          setDone(false);
+          void run();
+        }}
+      >
+        {error ? <Alert tone="danger">{error}</Alert> : null}
+        {done ? <Alert tone="success">{t("profile.passwordChanged")}</Alert> : null}
+        <div className="grid gap-3 sm:grid-cols-2">
           <Field label={t("profile.currentPassword")} error={fieldErrors.currentPassword}>
             <Input type="password" autoComplete="current-password" value={currentPassword} onChange={(e) => setCurrent(e.target.value)} required />
           </Field>
-          <Field
-            label={t("profile.newPassword")}
-            hint={t("invite.passwordHint", { n: companyConfig.auth.minPasswordLength })}
-            error={fieldErrors.newPassword}
-          >
+          <Field label={t("profile.newPassword")} error={fieldErrors.newPassword}>
             <Input
               type="password"
               autoComplete="new-password"
@@ -158,15 +146,15 @@ function PasswordCard() {
               minLength={companyConfig.auth.minPasswordLength}
             />
           </Field>
-          <div>
-            <Button type="submit" variant="outline" disabled={pending}>
-              {pending ? <Spinner /> : null}
-              {t("profile.changePassword")}
-            </Button>
-          </div>
-        </form>
-      </CardContent>
-    </Card>
+        </div>
+        <div>
+          <Button type="submit" variant="outline" disabled={pending}>
+            {pending ? <Spinner /> : null}
+            {t("profile.changePassword")}
+          </Button>
+        </div>
+      </form>
+    </Section>
   );
 }
 
@@ -177,53 +165,44 @@ function describeAgent(ua: string | null): string {
   return [browser, os].filter(Boolean).join(", ") || ua.slice(0, 40);
 }
 
-function SessionsCard() {
+/** Сеансы: вход на других устройствах можно завершить. */
+function SessionsSection() {
+  const { me } = useCabinet();
   const [sessions, setSessions] = React.useState<SessionInfo[] | null>(null);
-  const [failed, setFailed] = React.useState(false);
   const load = React.useCallback(() => {
-    setFailed(false);
     api<{ sessions: SessionInfo[] }>("GET", "/api/me/sessions")
       .then((r) => setSessions(r.sessions))
-      .catch(() => setFailed(true));
+      .catch(() => setSessions([]));
   }, []);
   React.useEffect(load, [load]);
-
+  if (!sessions || sessions.length < 2) return null;
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{t("profile.sessions")}</CardTitle>
-      </CardHeader>
-      <CardContent>
-        {failed ? (
-          <LoadError onRetry={load} />
-        ) : !sessions ? (
-          <Spinner />
-        ) : (
-          <ul className="flex flex-col divide-y divide-border">
-            {sessions.map((s) => (
-              <li key={s.id} className="flex items-center justify-between gap-3 py-2">
-                <div className="min-w-0 text-sm">
-                  <p className="truncate font-medium">
-                    {describeAgent(s.userAgent)} {s.current ? <span className="text-primary">· {t("profile.sessionCurrent")}</span> : null}
-                  </p>
-                  <p className="text-xs text-muted-foreground">{t("profile.sessionLastSeen", { date: formatDateTime(s.lastSeenAt) })}</p>
-                </div>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={async () => {
-                    const r = await api<{ current: boolean }>("DELETE", `/api/me/sessions/${s.id}`).catch(() => null);
-                    if (r?.current) window.location.assign("/login?reason=logout");
-                    else load();
-                  }}
-                >
-                  {t("profile.sessionRevoke")}
-                </Button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </CardContent>
-    </Card>
+    <Section title={t("profile.sessions")}>
+      <ul className="flex flex-col divide-y divide-border">
+        {sessions.map((s) => (
+          <li key={s.id} className="flex items-center justify-between gap-3 py-2.5 first:pt-0 last:pb-0">
+            <div className="min-w-0 text-[15px]">
+              <p className="truncate font-semibold">
+                {describeAgent(s.userAgent)}
+                {s.current ? <span className="font-normal text-muted-foreground"> · {t("profile.sessionCurrent")}</span> : null}
+              </p>
+              <p className="text-sm text-muted-foreground">{formatShortDateTime(s.lastSeenAt, me.company.timezone)}</p>
+            </div>
+            {!s.current ? (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={async () => {
+                  await api("DELETE", `/api/me/sessions/${s.id}`).catch(() => null);
+                  load();
+                }}
+              >
+                {t("profile.sessionRevoke")}
+              </Button>
+            ) : null}
+          </li>
+        ))}
+      </ul>
+    </Section>
   );
 }

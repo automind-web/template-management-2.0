@@ -26,9 +26,18 @@ export function tzOffsetMs(timeZone: string, at: number): number {
 
 /** Момент «конец дня» (23:59:59.999) даты YYYY-MM-DD в поясе компании, epoch ms. */
 export function endOfDayInZone(date: string, timeZone: string): number {
+  return dueMomentInZone(date, "23:59", timeZone);
+}
+
+/**
+ * Момент наступления срока: дата YYYY-MM-DD и время HH:MM в поясе компании.
+ * Срок наступает в конце указанной минуты (23:59 → 23:59:59.999).
+ */
+export function dueMomentInZone(date: string, time: string, timeZone: string): number {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
-  if (!m) throw new Error("bad_date");
-  const naiveUtc = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 23, 59, 59, 999);
+  const tm = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(time);
+  if (!m || !tm) throw new Error("bad_date");
+  const naiveUtc = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(tm[1]), Number(tm[2]), 59, 999);
   let guess = naiveUtc - tzOffsetMs(timeZone, naiveUtc);
   guess = naiveUtc - tzOffsetMs(timeZone, guess); // повторная коррекция при смене смещения
   return guess;
@@ -48,4 +57,9 @@ export function isValidTimeZone(tz: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** Время HH:MM в поясе компании для момента `at`. */
+export function timeInZone(at: number, timeZone: string): string {
+  return new Intl.DateTimeFormat("en-GB", { timeZone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(at));
 }

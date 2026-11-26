@@ -1,20 +1,21 @@
 "use client";
 
-import { Plus, X } from "lucide-react";
 import * as React from "react";
 import { useCabinet } from "@/components/cabinet/cabinet-context";
 import { useSubmit } from "@/components/forms";
-import { Button } from "@/components/ui/button";
+import { Button, Kbd } from "@/components/ui/button";
 import { Alert, Spinner } from "@/components/ui/card";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Field } from "@/components/ui/field";
-import { Input, Label, NativeSelect, Textarea } from "@/components/ui/input";
+import { Checkbox, Input, NativeSelect, Textarea } from "@/components/ui/input";
 import { companyConfig } from "@/config/company";
 import { api } from "@/lib/api";
+import { onSubmitShortcut, useSubmitShortcutLabel } from "@/lib/hotkeys";
 import { t } from "@/lib/i18n";
 import { newOpId } from "@/lib/op";
-import type { Assignee, ChecklistItem, TaskCard } from "./types";
+import type { Assignee, TaskCard } from "./types";
 
+/** Кому участник может назначить задачу в филиале (или «all» — для фильтра директора). */
 export function useAssignees(branchId: string | null, enabled = true) {
   const [list, setList] = React.useState<Assignee[] | null>(null);
   React.useEffect(() => {
@@ -29,41 +30,8 @@ export function useAssignees(branchId: string | null, enabled = true) {
   return list;
 }
 
-export function ChecklistEditor({ items, onChange }: { items: ChecklistItem[]; onChange: (items: ChecklistItem[]) => void }) {
-  return (
-    <div className="flex flex-col gap-2">
-      <Label>{t("tasks.form.checklist")}</Label>
-      {items.map((item, i) => (
-        <div key={item.id} className="flex gap-2">
-          <Input
-            value={item.text}
-            placeholder={t("tasks.form.checklistPlaceholder")}
-            aria-label={`${t("tasks.form.checklist")} ${i + 1}`}
-            maxLength={300}
-            onChange={(e) => onChange(items.map((it) => (it.id === item.id ? { ...it, text: e.target.value } : it)))}
-          />
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label={t("tasks.form.checklistRemove")}
-            onClick={() => onChange(items.filter((it) => it.id !== item.id))}
-          >
-            <X />
-          </Button>
-        </div>
-      ))}
-      <div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => onChange([...items, { id: crypto.randomUUID().slice(0, 8), text: "", done: false }])}
-        >
-          <Plus />
-          {t("tasks.form.checklistAdd")}
-        </Button>
-      </div>
-    </div>
-  );
+export function assigneeLabel(a: Assignee): string {
+  return a.self ? t("tasks.form.assigneeSelf", { name: a.displayName }) : a.displayName;
 }
 
 export function CreateTaskDialog({
@@ -75,26 +43,36 @@ export function CreateTaskDialog({
   onOpenChange: (open: boolean) => void;
   onCreated: (card: TaskCard) => void;
 }) {
-  const { me, branchId } = useCabinet();
-  const assignees = useAssignees(branchId, open);
+  const { me, concreteBranchId } = useCabinet();
+  const [branchId, setBranch] = React.useState(concreteBranchId ?? "");
+  const assignees = useAssignees(branchId || null, open);
   const [title, setTitle] = React.useState("");
   const [assigneeId, setAssignee] = React.useState(me.user.id);
   const [dueDate, setDue] = React.useState("");
+  const [dueTime, setDueTime] = React.useState("");
   const [description, setDescription] = React.useState("");
   const [resultCriteria, setCriteria] = React.useState("");
-  const [checklist, setChecklist] = React.useState<ChecklistItem[]>([]);
   const [requiresResult, setRequiresResult] = React.useState(companyConfig.rules.defaultRequiresResult);
   const [requiresAttachment, setRequiresAttachment] = React.useState(companyConfig.rules.defaultRequiresAttachment);
-  // Один opId на одну попытку создания: повторное нажатие не создаст вторую задачу.
+  // Один opId на попытку создания: повторное нажатие не создаст вторую задачу.
   const opId = React.useRef(newOpId());
+  const shortcut = useSubmitShortcutLabel();
+
+  React.useEffect(() => {
+    if (open && concreteBranchId) setBranch((b) => b || concreteBranchId);
+  }, [open, concreteBranchId]);
+  // Исполнитель другого филиала сбрасывается на «я».
+  React.useEffect(() => {
+    if (assignees && !assignees.some((a) => a.userId === assigneeId)) setAssignee(me.user.id);
+  }, [assignees, assigneeId, me.user.id]);
 
   const reset = () => {
     setTitle("");
     setAssignee(me.user.id);
     setDue("");
+    setDueTime("");
     setDescription("");
     setCriteria("");
-    setChecklist([]);
     setRequiresResult(companyConfig.rules.defaultRequiresResult);
     setRequiresAttachment(companyConfig.rules.defaultRequiresAttachment);
     opId.current = newOpId();
@@ -103,13 +81,13 @@ export function CreateTaskDialog({
   const { run, pending, error, fieldErrors } = useSubmit(async () => {
     const card = await api<TaskCard>("POST", "/api/tasks", {
       opId: opId.current,
-      branchId,
+      branchId: branchId || null,
       title,
       assigneeId,
       dueDate: dueDate || null,
+      dueTime: dueDate && dueTime ? dueTime : null,
       description: description || null,
       resultCriteria: resultCriteria || null,
-      checklist: checklist.filter((c) => c.text.trim()).map((c) => ({ ...c, text: c.text.trim() })),
       requiresResult,
       requiresAttachment,
     });
@@ -118,13 +96,28 @@ export function CreateTaskDialog({
     onCreated(card);
   });
 
-  const branchName = me.branches.find((b) => b.id === branchId)?.name ?? "";
-
+  const formId = "create-task-form";
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent title={t("tasks.create")} description={t("tasks.form.branch", { name: branchName })}>
+      <DialogContent
+        title={t("tasks.form.newTitle")}
+        footer={
+          <>
+            <Button variant="outline" onClick={() => onOpenChange(false)}>
+              {t("app.cancel")}
+            </Button>
+            <Button type="submit" form={formId} disabled={pending || !branchId}>
+              {pending ? <Spinner /> : null}
+              {t("tasks.form.create")}
+              <Kbd>{shortcut}</Kbd>
+            </Button>
+          </>
+        }
+      >
         <form
+          id={formId}
           className="flex flex-col gap-4"
+          onKeyDown={onSubmitShortcut}
           onSubmit={(e) => {
             e.preventDefault();
             void run();
@@ -134,46 +127,50 @@ export function CreateTaskDialog({
           <Field label={t("tasks.form.title")} error={fieldErrors.title}>
             <Input value={title} onChange={(e) => setTitle(e.target.value)} required maxLength={300} autoFocus />
           </Field>
-          <Field label={t("tasks.form.assignee")} error={fieldErrors.assigneeId}>
-            <NativeSelect value={assigneeId} onChange={(e) => setAssignee(e.target.value)} disabled={!assignees || assignees.length <= 1}>
-              {(assignees ?? [{ userId: me.user.id, displayName: me.user.displayName, role: me.role, self: true }]).map((a) => (
-                <option key={a.userId} value={a.userId}>
-                  {a.self ? t("tasks.form.assigneeSelf", { name: a.displayName }) : `${a.displayName} · ${t(`roles.${a.role}`)}`}
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label={t("tasks.form.branch")} error={fieldErrors.branchId}>
+              <NativeSelect value={branchId} onChange={(e) => setBranch(e.target.value)} disabled={me.branches.length <= 1} required>
+                <option value="" disabled>
+                  {t("tasks.form.choose")}
                 </option>
-              ))}
-            </NativeSelect>
-          </Field>
-          <Field label={t("tasks.form.dueDate")} hint={t("tasks.form.dueHint")} error={fieldErrors.dueDate}>
-            <Input type="date" value={dueDate} onChange={(e) => setDue(e.target.value)} />
-          </Field>
+                {me.branches.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.name}
+                  </option>
+                ))}
+              </NativeSelect>
+            </Field>
+            <Field label={t("tasks.form.assignee")} error={fieldErrors.assigneeId}>
+              <NativeSelect value={assigneeId} onChange={(e) => setAssignee(e.target.value)} disabled={!assignees || assignees.length <= 1}>
+                {(assignees ?? [{ userId: me.user.id, displayName: me.user.displayName, role: me.role, self: true }]).map((a) => (
+                  <option key={a.userId} value={a.userId}>
+                    {assigneeLabel(a)}
+                  </option>
+                ))}
+              </NativeSelect>
+            </Field>
+            <Field label={t("tasks.form.dueDate")} error={fieldErrors.dueDate}>
+              <Input type="date" value={dueDate} onChange={(e) => setDue(e.target.value)} />
+            </Field>
+            <Field label={t("tasks.form.dueTime")} hint={dueDate && !dueTime ? t("tasks.form.dueTimeHint", { time: me.dueTime }) : undefined} error={fieldErrors.dueTime}>
+              <Input type="time" value={dueTime} onChange={(e) => setDueTime(e.target.value)} disabled={!dueDate} />
+            </Field>
+          </div>
           <Field label={t("tasks.form.description")} error={fieldErrors.description}>
             <Textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3} maxLength={10000} />
           </Field>
-          <Field label={t("tasks.form.resultCriteria")} hint={t("tasks.form.resultCriteriaHint")} error={fieldErrors.resultCriteria}>
-            <Textarea value={resultCriteria} onChange={(e) => setCriteria(e.target.value)} rows={2} maxLength={5000} />
-          </Field>
-          <ChecklistEditor items={checklist} onChange={setChecklist} />
-          <label className="flex items-start gap-2 text-sm">
-            <input type="checkbox" className="mt-0.5 size-4" checked={requiresResult} onChange={(e) => setRequiresResult(e.target.checked)} />
-            {t("tasks.form.requiresResult")}
-          </label>
-          <label className="flex items-start gap-2 text-sm">
-            <input
-              type="checkbox"
-              className="mt-0.5 size-4"
-              checked={requiresAttachment}
-              onChange={(e) => setRequiresAttachment(e.target.checked)}
+          <Field label={t("tasks.form.resultCriteria")} error={fieldErrors.resultCriteria}>
+            <Textarea
+              value={resultCriteria}
+              onChange={(e) => setCriteria(e.target.value)}
+              rows={3}
+              maxLength={5000}
+              placeholder={t("tasks.form.resultCriteriaHint")}
             />
-            {t("tasks.form.requiresAttachment")}
-          </label>
-          <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => onOpenChange(false)}>
-              {t("app.cancel")}
-            </Button>
-            <Button type="submit" disabled={pending || !branchId}>
-              {pending ? <Spinner /> : null}
-              {t("tasks.form.create")}
-            </Button>
+          </Field>
+          <div className="flex flex-wrap gap-x-6 gap-y-2">
+            <Checkbox label={t("tasks.form.requiresResult")} checked={requiresResult} onChange={(e) => setRequiresResult(e.target.checked)} />
+            <Checkbox label={t("tasks.form.requiresAttachment")} checked={requiresAttachment} onChange={(e) => setRequiresAttachment(e.target.checked)} />
           </div>
         </form>
       </DialogContent>

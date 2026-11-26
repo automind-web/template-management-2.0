@@ -7,6 +7,7 @@ export type TaskListItem = {
   title: string;
   status: StatusRef;
   assignee: { id: string; displayName: string; self: boolean };
+  branchName: string | null;
   dueDate: string | null;
   dueAt: number | null;
   overdue: boolean;
@@ -23,6 +24,9 @@ export type TaskList = {
   viewsDiffer: boolean;
   counts: { byStatus: Record<string, number>; overdue: number; cancelled: number; total: number };
   statuses: StatusRef[];
+  cancelledName: string;
+  allBranches: boolean;
+  timezone: string;
   today: string;
   snapshotAt: number;
 };
@@ -50,6 +54,7 @@ export type TaskCard = {
     creator: { id: string; displayName: string | null };
     isPersonal: boolean;
     dueDate: string | null;
+    dueTime: string | null;
     dueAt: number | null;
     overdue: boolean;
     checklist: ChecklistItem[];

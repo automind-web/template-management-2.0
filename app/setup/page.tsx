@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { AuthShell, CopyField, useSubmit } from "@/components/forms";
+import { AuthShell, CopyField, TextLink, useSubmit } from "@/components/forms";
 import { Button } from "@/components/ui/button";
 import { Alert, Spinner } from "@/components/ui/card";
 import { Field } from "@/components/ui/field";
@@ -15,8 +15,8 @@ type Status = { needsSetup: boolean; companyExists: boolean; activationCodeConfi
 export default function SetupPage() {
   const [status, setStatus] = React.useState<Status | null>(null);
   const [code, setCode] = React.useState("");
-  const [companyName, setCompanyName] = React.useState(companyConfig.name);
-  const [timezone, setTimezone] = React.useState(companyConfig.timezone);
+  const [companyName, setCompanyName] = React.useState("");
+  const [ttl, setTtl] = React.useState(String(companyConfig.invitations.ownerTtlHours));
   const [result, setResult] = React.useState<{ inviteUrl: string; expiresAt: number } | null>(null);
 
   React.useEffect(() => {
@@ -24,34 +24,34 @@ export default function SetupPage() {
   }, []);
 
   const { run, pending, error, fieldErrors } = useSubmit(async () => {
-    const r = await api<{ inviteUrl: string; expiresAt: number }>(
-      "POST",
-      "/api/setup/owner-invite",
-      { code, companyName, timezone },
-      { redirectOn401: false },
+    setResult(
+      await api<{ inviteUrl: string; expiresAt: number }>(
+        "POST",
+        "/api/setup/owner-invite",
+        { code, companyName: companyName.trim() || undefined, ttlHours: Number(ttl) || undefined },
+        { redirectOn401: false },
+      ),
     );
-    setResult(r);
   });
 
   if (status && !status.needsSetup) {
     return (
       <AuthShell title={t("setup.title")}>
         <Alert>{t("setup.alreadyDone")}</Alert>
-        <Button asChild className="mt-4 w-full">
-          <a href="/login">{t("invite.toLogin")}</a>
-        </Button>
+        <TextLink href="/login" className="mt-4 inline-block">
+          {t("invite.toLogin")}
+        </TextLink>
       </AuthShell>
     );
   }
 
   if (result) {
     return (
-      <AuthShell title={t("setup.resultTitle")}>
+      <AuthShell title={t("setup.resultTitle")} description={t("setup.resultHint", { date: formatDateTime(result.expiresAt) })}>
         <div className="flex flex-col gap-4">
-          <p className="text-sm text-muted-foreground">{t("setup.resultHint", { date: formatDateTime(result.expiresAt) })}</p>
           <CopyField value={result.inviteUrl} />
-          <Button asChild className="w-full">
-            <a href={result.inviteUrl}>{t("app.open")}</a>
+          <Button asChild size="lg" className="w-full">
+            <a href={result.inviteUrl}>{t("setup.openInvite")}</a>
           </Button>
         </div>
       </AuthShell>
@@ -59,7 +59,7 @@ export default function SetupPage() {
   }
 
   return (
-    <AuthShell title={t("setup.title")}>
+    <AuthShell title={t("setup.title")} description={t("setup.intro")}>
       <form
         className="flex flex-col gap-4"
         onSubmit={(e) => {
@@ -67,23 +67,20 @@ export default function SetupPage() {
           void run();
         }}
       >
-        <p className="text-sm text-muted-foreground">{t("setup.intro")}</p>
         {status && !status.activationCodeConfigured ? <Alert tone="danger">{t("setup.codeMissing")}</Alert> : null}
         {error ? <Alert tone="danger">{error}</Alert> : null}
         <Field label={t("setup.code")} error={fieldErrors.code}>
           <Input type="password" autoComplete="off" value={code} onChange={(e) => setCode(e.target.value)} required autoFocus />
         </Field>
         {!status?.companyExists ? (
-          <>
-            <Field label={t("setup.companyName")} error={fieldErrors.companyName}>
-              <Input value={companyName} onChange={(e) => setCompanyName(e.target.value)} maxLength={120} />
-            </Field>
-            <Field label={t("setup.timezone")} error={fieldErrors.timezone}>
-              <Input value={timezone} onChange={(e) => setTimezone(e.target.value)} />
-            </Field>
-          </>
+          <Field label={t("setup.companyName")} error={fieldErrors.companyName}>
+            <Input value={companyName} onChange={(e) => setCompanyName(e.target.value)} maxLength={120} />
+          </Field>
         ) : null}
-        <Button type="submit" disabled={pending} className="w-full">
+        <Field label={t("setup.ttl")} error={fieldErrors.ttlHours}>
+          <Input type="number" min={1} max={720} value={ttl} onChange={(e) => setTtl(e.target.value)} required />
+        </Field>
+        <Button type="submit" size="lg" disabled={pending} className="w-full">
           {pending ? <Spinner /> : null}
           {t("setup.submit")}
         </Button>

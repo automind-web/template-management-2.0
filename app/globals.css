@@ -1,8 +1,8 @@
 @import "tailwindcss";
 
 /*
- * Единые правила оформления. Значения задаются из config/company.ts
- * (см. app/layout.tsx → themeStyle), здесь — только связи токенов.
+ * Единые правила оформления. Акцентный цвет, логотип и шрифт задаются в
+ * «Настройки системы → Компания» и подставляются в app/layout.tsx.
  */
 @theme inline {
   --color-background: var(--am-background);
@@ -11,7 +11,7 @@
   --color-muted-foreground: var(--am-muted-text);
   --color-muted: var(--am-muted);
   --color-border: var(--am-border);
-  --color-input: var(--am-border);
+  --color-input: var(--am-input);
   --color-primary: var(--am-accent);
   --color-primary-foreground: var(--am-accent-foreground);
   --color-selected: var(--am-selected);
@@ -26,20 +26,21 @@
 }
 
 :root {
-  --am-background: #f7f7f8;
+  --am-background: #f4f5f8;
   --am-surface: #ffffff;
-  --am-text: #18181b;
-  --am-muted-text: #5b5b66;
-  --am-muted: #f0f0f2;
-  --am-border: #e4e4e7;
-  --am-accent: #2563eb;
+  --am-text: #1c1e24;
+  --am-muted-text: #6b7280;
+  --am-muted: #f1f3f6;
+  --am-border: #e6e8ec;
+  --am-input: #d9dde3;
+  --am-accent: #2f5bea;
   --am-accent-foreground: #ffffff;
-  --am-selected: color-mix(in srgb, var(--am-accent) 10%, white);
-  --am-danger: #c62828;
-  --am-success: #1f7a3d;
+  --am-selected: color-mix(in srgb, var(--am-accent) 11%, white);
+  --am-danger: #d32f2f;
+  --am-success: #1f8a46;
   --am-warning: #a15c00;
   --am-radius: 0.625rem;
-  --am-font: ui-sans-serif, system-ui, sans-serif;
+  --am-font: "Inter", "Noto Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
   color-scheme: light;
 }
 
@@ -55,6 +56,14 @@ body {
 :focus-visible {
   outline: 2px solid var(--am-accent);
   outline-offset: 2px;
+}
+
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: none;
+  border-color: var(--am-accent);
+  box-shadow: 0 0 0 1px var(--am-accent);
 }
 
 @media (prefers-reduced-motion: reduce) {

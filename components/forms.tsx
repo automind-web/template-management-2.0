@@ -1,10 +1,10 @@
 "use client";
 
-import { Copy, Check } from "lucide-react";
+import { Check, Copy } from "lucide-react";
 import * as React from "react";
 import { ApiError } from "@/lib/api";
-import { companyConfig } from "@/config/company";
 import { errorText, fieldText, t } from "@/lib/i18n";
+import { cn } from "@/lib/utils";
 import { Button } from "./ui/button";
 import { Card } from "./ui/card";
 
@@ -17,6 +17,8 @@ export function useSubmit<T>(action: () => Promise<T>) {
   const [error, setError] = React.useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = React.useState<Record<string, string>>({});
   const inFlight = React.useRef(false);
+  const actionRef = React.useRef(action);
+  actionRef.current = action;
 
   const run = React.useCallback(async (): Promise<T | undefined> => {
     if (inFlight.current) return undefined;
@@ -25,11 +27,10 @@ export function useSubmit<T>(action: () => Promise<T>) {
     setError(null);
     setFieldErrors({});
     try {
-      return await action();
+      return await actionRef.current();
     } catch (e) {
       if (e instanceof ApiError) {
-        const fields = Object.fromEntries(Object.entries(e.fields).map(([k, v]) => [k, fieldText(v) ?? v]));
-        setFieldErrors(fields);
+        setFieldErrors(Object.fromEntries(Object.entries(e.fields).map(([k, v]) => [k, fieldText(v) ?? v])));
         setError(errorText(e.code));
       } else {
         setError(errorText("internal"));
@@ -39,45 +40,29 @@ export function useSubmit<T>(action: () => Promise<T>) {
       inFlight.current = false;
       setPending(false);
     }
-  }, [action]);
+  }, []);
 
   return { run, pending, error, fieldErrors, setError };
 }
 
-export function AuthShell({ title, children }: { title: string; children: React.ReactNode }) {
+/** Страницы без входа: одна карточка по центру. */
+export function AuthShell({ title, description, children }: { title: string; description?: React.ReactNode; children: React.ReactNode }) {
   return (
-    <main className="flex min-h-dvh items-center justify-center px-4 py-8">
-      <div className="w-full max-w-sm">
-        <div className="mb-6 flex items-center gap-3">
-          <Monogram />
-          <div className="min-w-0">
-            <p className="truncate text-base font-semibold">{companyConfig.name}</p>
-            <p className="text-sm text-muted-foreground">{t("app.tagline")}</p>
-          </div>
-        </div>
-        <Card className="p-5 sm:p-6">
-          <h1 className="mb-4 text-xl font-semibold">{title}</h1>
-          {children}
-        </Card>
-      </div>
+    <main className="flex min-h-dvh items-center justify-center px-4 py-10">
+      <Card className="w-full max-w-[420px] p-6 sm:p-7">
+        <h1 className="text-2xl font-bold tracking-tight">{title}</h1>
+        {description ? <p className="mt-2 text-[15px] leading-relaxed text-muted-foreground">{description}</p> : null}
+        <div className="mt-5">{children}</div>
+      </Card>
     </main>
   );
 }
 
-export function Monogram({ name = companyConfig.name }: { name?: string }) {
-  if (companyConfig.logo) {
-    return <img src={companyConfig.logo} alt="" className="size-10 rounded-md object-contain" />;
-  }
-  const letters = name
-    .split(/\s+/)
-    .map((w) => w[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase();
+export function TextLink({ href, children, className }: { href: string; children: React.ReactNode; className?: string }) {
   return (
-    <span aria-hidden className="flex size-10 shrink-0 items-center justify-center rounded-md bg-foreground text-sm font-semibold text-background">
-      {letters || "AM"}
-    </span>
+    <a href={href} className={cn("text-[15px] text-primary underline-offset-4 hover:underline", className)}>
+      {children}
+    </a>
   );
 }
 
@@ -90,7 +75,7 @@ export function CopyField({ value }: { value: string }) {
         value={value}
         onFocus={(e) => e.currentTarget.select()}
         className="h-10 min-w-0 flex-1 rounded-md border border-input bg-muted px-3 font-mono text-xs"
-        aria-label={t("app.copy")}
+        aria-label={t("app.link")}
       />
       <Button
         variant="outline"
@@ -105,7 +90,7 @@ export function CopyField({ value }: { value: string }) {
         }}
       >
         {copied ? <Check /> : <Copy />}
-        <span className="sr-only sm:not-sr-only">{copied ? t("app.copied") : t("app.copy")}</span>
+        {copied ? t("app.copied") : t("app.copy")}
       </Button>
     </div>
   );
@@ -113,7 +98,7 @@ export function CopyField({ value }: { value: string }) {
 
 export function LoadError({ onRetry, message }: { onRetry: () => void; message?: string }) {
   return (
-    <div role="alert" className="flex flex-col items-start gap-3 rounded-md border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
+    <div role="alert" className="flex flex-col items-start gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
       <p>{message ?? errorText("network")}</p>
       <Button variant="outline" size="sm" onClick={onRetry}>
         {t("app.retry")}

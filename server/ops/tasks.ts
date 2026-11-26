@@ -14,7 +14,7 @@ import { getDb, schema } from "../db";
 import { getEnv } from "../env";
 import { AppError, forbidden, notFound } from "../errors";
 import { isDirector, isManager, resolveBranch, resolveBranchScope } from "../permissions";
-import { dateInZone, endOfDayInZone } from "../time";
+import { dateInZone, dueMomentInZone, timeInZone } from "../time";
 import { actorRoles, allowedTransitions, loadWorkflow, type Transition, type Workflow } from "../workflow";
 
 type TaskRow = typeof schema.tasks.$inferSelect;
@@ -31,7 +31,7 @@ export function canView(actor: Actor, task: Pick<TaskRow, "companyId" | "branchI
   if (isDirector(actor) || isManager(actor)) return true;
   if (task.assigneeId === actor.user.id) return true;
   if (task.creatorId === actor.user.id && companyConfig.rules.creatorKeepsAccess) return true;
-  return companyConfig.rules.employeeSeesColleagues;
+  return actor.settings.employeeSeesColleagues && task.branchId === actor.membership.branchId;
 }
 
 /** Может ли менять поля задачи (название, срок, исполнителя и т. д.). */
@@ -50,9 +50,11 @@ async function loadTask(actor: Actor, taskId: string): Promise<TaskRow> {
 
 /** Кому участник может назначить задачу в филиале. */
 export async function assignableUsers(actor: Actor, branchId: string) {
-  resolveBranch(actor, branchId);
+  // «Все филиалы» — только для фильтра списка у директора.
+  const branchIds = branchId === "all" && isDirector(actor) ? actor.branches.map((b) => b.id) : [resolveBranch(actor, branchId)];
   const self = { userId: actor.user.id, displayName: actor.user.displayName, role: actor.membership.role, self: true };
   if (!isDirector(actor) && !isManager(actor)) return [self];
+  if (branchIds.length === 0) return [self];
   const rows = await getDb()
     .select({ userId: schema.users.id, displayName: schema.users.displayName, role: schema.memberships.role })
     .from(schema.memberships)
@@ -60,7 +62,7 @@ export async function assignableUsers(actor: Actor, branchId: string) {
     .where(
       and(
         eq(schema.memberships.companyId, actor.company.id),
-        eq(schema.memberships.branchId, branchId),
+        inArray(schema.memberships.branchId, branchIds),
         isNull(schema.memberships.revokedAt),
         isNull(schema.users.disabledAt),
         isManager(actor) ? eq(schema.memberships.role, "employee") : inArray(schema.memberships.role, ["employee", "manager"]),
@@ -126,10 +128,13 @@ function searchTextOf(t: { number: number; title: string; description?: string |
   return `#${t.number} ${t.title} ${t.description ?? ""} ${t.resultCriteria ?? ""}`.toLocaleLowerCase("ru");
 }
 
-function dueAtOf(dueDate: string | null | undefined, timezone: string): number | null {
+const timeSchema = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "time_invalid");
+
+/** Момент срока: дата + время задачи или время по умолчанию из настроек компании (23:59). */
+function dueAtOf(actor: Actor, dueDate: string | null | undefined, dueTime: string | null | undefined): number | null {
   if (!dueDate) return null;
   try {
-    return endOfDayInZone(dueDate, timezone);
+    return dueMomentInZone(dueDate, dueTime || actor.settings.dueTime, actor.company.timezone);
   } catch {
     throw new AppError("validation", 400, { fields: { dueDate: "date_invalid" } });
   }
@@ -183,6 +188,7 @@ export const createTaskSchema = z.object({
   title: z.string().trim().min(1, "required").max(300, "too_long"),
   assigneeId: z.string().min(1).optional().nullable(),
   dueDate: dateSchema.optional().nullable(),
+  dueTime: timeSchema.optional().nullable(),
   description: z.string().trim().max(10_000, "too_long").optional().nullable(),
   resultCriteria: z.string().trim().max(5_000, "too_long").optional().nullable(),
   checklist: checklistSchema.optional(),
@@ -199,7 +205,7 @@ export async function createTask(actor: Actor, input: z.infer<typeof createTaskS
   return runOnce(actor, input.opId, "task.create", async () => {
     const db = getDb();
     const now = Date.now();
-    const dueAt = dueAtOf(input.dueDate, actor.company.timezone);
+    const dueAt = dueAtOf(actor, input.dueDate, input.dueTime);
     for (let attempt = 0; attempt < 5; attempt++) {
       const [{ max } = { max: 0 }] = await db
         .select({ max: sql<number>`coalesce(max(${schema.tasks.number}), 0)` })
@@ -219,6 +225,7 @@ export async function createTask(actor: Actor, input: z.infer<typeof createTaskS
         creatorId: actor.user.id,
         isPersonal: assigneeId === actor.user.id,
         dueDate: input.dueDate || null,
+        dueTime: input.dueDate ? input.dueTime || null : null,
         dueAt,
         requiresResult: input.requiresResult ?? companyConfig.rules.defaultRequiresResult,
         requiresAttachment: input.requiresAttachment ?? companyConfig.rules.defaultRequiresAttachment,
@@ -263,6 +270,7 @@ export const updateTaskSchema = z.object({
   description: z.string().trim().max(10_000, "too_long").nullable().optional(),
   resultCriteria: z.string().trim().max(5_000, "too_long").nullable().optional(),
   dueDate: dateSchema.nullable().optional(),
+  dueTime: timeSchema.nullable().optional(),
   assigneeId: z.string().min(1).optional(),
   checklist: checklistSchema.optional(),
   requiresResult: z.boolean().optional(),
@@ -296,10 +304,17 @@ export async function updateTask(actor: Actor, taskId: string, input: z.infer<ty
       patch.resultCriteria = input.resultCriteria || null;
       field("resultCriteria", "field_changed", task.resultCriteria ? "…" : null, patch.resultCriteria ? "…" : null);
     }
-    if (input.dueDate !== undefined && (input.dueDate || null) !== task.dueDate) {
-      patch.dueDate = input.dueDate || null;
-      patch.dueAt = dueAtOf(input.dueDate, actor.company.timezone);
-      field("dueDate", "due_changed", task.dueDate, patch.dueDate);
+    if (input.dueDate !== undefined || input.dueTime !== undefined) {
+      const nextDate = input.dueDate !== undefined ? input.dueDate || null : task.dueDate;
+      const nextTime = nextDate ? (input.dueTime !== undefined ? input.dueTime || null : task.dueTime) : null;
+      const nextAt = dueAtOf(actor, nextDate, nextTime);
+      if (nextAt !== task.dueAt || nextDate !== task.dueDate || nextTime !== task.dueTime) {
+        patch.dueDate = nextDate;
+        patch.dueTime = nextTime;
+        patch.dueAt = nextAt;
+        const label = (d: string | null, at: number | null) => (d && at ? `${d} ${timeInZone(at, actor.company.timezone)}` : null);
+        field("dueAt", "due_changed", label(task.dueDate, task.dueAt), label(nextDate, nextAt));
+      }
     }
     if (input.assigneeId !== undefined && input.assigneeId !== task.assigneeId) {
       await assertAssignable(actor, task.branchId, input.assigneeId);
@@ -632,6 +647,7 @@ export async function getTaskCard(actor: Actor, taskId: string) {
       creator: { id: task.creatorId, displayName: name(task.creatorId) },
       isPersonal: task.isPersonal,
       dueDate: task.dueDate,
+      dueTime: task.dueDate ? (task.dueTime ?? actor.settings.dueTime) : null,
       dueAt: task.dueAt,
       overdue: Boolean(task.dueAt && task.dueAt < now && !done && !task.cancelledAt),
       checklist: JSON.parse(task.checklistJson) as z.infer<typeof checklistSchema>,
@@ -724,14 +740,16 @@ export function parseListQuery(url: URL) {
 
 /** Различаются ли «Мои задачи» и «Все доступные» для участника. */
 export function viewsDiffer(actor: Actor): boolean {
-  return isDirector(actor) || isManager(actor) || companyConfig.rules.employeeSeesColleagues;
+  return isDirector(actor) || isManager(actor) || actor.settings.employeeSeesColleagues;
 }
 
 export async function listTasks(actor: Actor, query: z.infer<typeof listQuerySchema>) {
   const db = getDb();
   const wf = await loadWorkflow(actor.company.id);
   // Список и изменения — в конкретном филиале; «все филиалы» только для директора.
-  const branchIds = query.branch === "all" ? resolveBranchScope(actor, "all") : [resolveBranch(actor, query.branch)];
+  const allBranches = query.branch === "all" || (!query.branch && isDirector(actor));
+  const branchIds = allBranches ? resolveBranchScope(actor, "all") : [resolveBranch(actor, query.branch)];
+  if (branchIds.length === 0) throw new AppError("no_branches", 409);
   const now = Date.now();
   const tz = actor.company.timezone;
   const today = dateInZone(now, tz);
@@ -741,15 +759,24 @@ export async function listTasks(actor: Actor, query: z.infer<typeof listQuerySch
 
   // Базовые условия: права участника (сначала права, потом фильтры).
   const base: SQL[] = [eq(schema.tasks.companyId, actor.company.id), inArray(schema.tasks.branchId, branchIds)];
-  if (!isDirector(actor) && !isManager(actor) && !companyConfig.rules.employeeSeesColleagues) {
+  if (!isDirector(actor) && !isManager(actor) && !actor.settings.employeeSeesColleagues) {
     const own = [eq(schema.tasks.assigneeId, actor.user.id)];
     if (companyConfig.rules.creatorKeepsAccess) own.push(eq(schema.tasks.creatorId, actor.user.id));
     base.push(or(...own)!);
   }
   if (view === "mine") base.push(eq(schema.tasks.assigneeId, actor.user.id));
   if (query.q) {
-    const needle = query.q.toLocaleLowerCase("ru").replaceAll(/[\\%_]/g, (m) => `\\${m}`);
-    base.push(sql`${schema.tasks.searchText} LIKE ${`%${needle}%`} ESCAPE '\\'`);
+    const lower = query.q.toLocaleLowerCase("ru").replace(/^#/, "");
+    const needle = lower.replaceAll(/[\\%_]/g, (m) => `\\${m}`);
+    const byText = sql`${schema.tasks.searchText} LIKE ${`%${needle}%`} ESCAPE '\\'`;
+    // Имя исполнителя: SQLite не сравнивает кириллицу без учёта регистра — сопоставление в JS.
+    const people = await db
+      .select({ id: schema.users.id, name: schema.users.displayName })
+      .from(schema.memberships)
+      .innerJoin(schema.users, eq(schema.users.id, schema.memberships.userId))
+      .where(eq(schema.memberships.companyId, actor.company.id));
+    const ids = [...new Set(people.filter((p) => p.name.toLocaleLowerCase("ru").includes(lower)).map((p) => p.id))];
+    base.push(ids.length ? or(byText, inArray(schema.tasks.assigneeId, ids))! : byText);
   }
   if (query.assignee) base.push(eq(schema.tasks.assigneeId, query.assignee === "me" ? actor.user.id : query.assignee));
   const notDone = doneKeys.length ? notInArray(schema.tasks.statusKey, doneKeys) : sql`1 = 1`;
@@ -818,6 +845,7 @@ export async function listTasks(actor: Actor, query: z.infer<typeof listQuerySch
       title: r.title,
       status: { key: r.statusKey, name: status?.name ?? r.statusKey, category: status?.category ?? "open" },
       assignee: { id: r.assigneeId, displayName: r.assigneeName, self: r.assigneeId === actor.user.id },
+      branchName: actor.branches.find((b) => b.id === r.branchId)?.name ?? null,
       dueDate: r.dueDate,
       dueAt: r.dueAt,
       overdue: Boolean(r.dueAt && r.dueAt < now && status?.category !== "done" && !r.cancelledAt),
@@ -840,6 +868,9 @@ export async function listTasks(actor: Actor, query: z.infer<typeof listQuerySch
       total: counts.reduce((a, c) => a + Number(c.n), 0),
     },
     statuses: wf.statuses.map((s) => ({ key: s.key, name: s.name, category: s.category })),
+    cancelledName: actor.settings.cancelledName,
+    allBranches,
+    timezone: tz,
     today,
     snapshotAt: now,
   };

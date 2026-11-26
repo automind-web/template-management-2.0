@@ -66,6 +66,8 @@ export const memberships = sqliteTable(
     branchId: text("branch_id").references(() => branches.id),
     role: text("role", { enum: ["employee", "manager", "director"] }).notNull(),
     position: text("position"),
+    /** Руководитель может приглашать сотрудников своего филиала. */
+    canInvite: integer("can_invite", { mode: "boolean" }).notNull().default(false),
     revokedAt: integer("revoked_at"),
     createdAt: integer("created_at").notNull().default(now),
     updatedAt: integer("updated_at").notNull().default(now),
@@ -203,7 +205,9 @@ export const tasks = sqliteTable(
     isPersonal: integer("is_personal", { mode: "boolean" }).notNull().default(false),
     /** Дата срока YYYY-MM-DD в часовом поясе компании; null — «Без срока». */
     dueDate: text("due_date"),
-    /** Момент наступления срока (конец дня 23:59:59.999 в поясе компании), epoch ms. */
+    /** Время срока HH:MM в поясе компании; null — время по умолчанию из настроек компании. */
+    dueTime: text("due_time"),
+    /** Момент наступления срока (дата + время в поясе компании), epoch ms. */
     dueAt: integer("due_at"),
     requiresResult: integer("requires_result", { mode: "boolean" }).notNull().default(false),
     requiresAttachment: integer("requires_attachment", { mode: "boolean" }).notNull().default(false),

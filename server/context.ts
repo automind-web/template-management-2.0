@@ -4,6 +4,7 @@ import { getDb, schema } from "./db";
 import { AppError, unauthorized } from "./errors";
 import { parseCookies, SESSION_COOKIE } from "./http";
 import { findSession, type SessionRow } from "./session";
+import { loadSettings, type CompanySettings } from "./settings";
 
 export type BranchRef = { id: string; name: string };
 
@@ -14,10 +15,12 @@ export type BranchRef = { id: string; name: string };
 export type Actor = {
   user: { id: string; login: string; displayName: string; phone: string | null; phoneVerifiedAt: number | null };
   session: SessionRow;
-  membership: { id: string; role: Role; branchId: string | null; position: string | null };
+  membership: { id: string; role: Role; branchId: string | null; position: string | null; canInvite: boolean };
   company: { id: string; name: string; timezone: string; locale: string };
   /** Филиалы, доступные участнику (директор — все активные филиалы компании). */
   branches: BranchRef[];
+  /** Настройки компании на момент запроса (видимость, приёмка, срок по умолчанию). */
+  settings: CompanySettings;
   channel: "web" | "whatsapp" | "plugin";
 };
 
@@ -68,9 +71,11 @@ export async function loadActorForSession(session: SessionRow): Promise<Actor | 
       role: membership.role,
       branchId: membership.branchId,
       position: membership.position,
+      canInvite: membership.canInvite,
     },
     company: { id: company.id, name: company.name, timezone: company.timezone, locale: company.locale },
     branches,
+    settings: await loadSettings(company.id),
     channel: "web",
   };
 }

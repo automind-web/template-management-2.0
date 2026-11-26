@@ -104,6 +104,16 @@ r = await director("POST", "/api/invites", { role: "manager", branchId: b2 });
 const m2Inv = tokenOf(r.data.inviteUrl);
 r = await director("POST", "/api/invites", { role: "director", branchId: b1 });
 assert.equal(r.status, 400, "директора по приглашению не создать");
+r = await director("PATCH", "/api/settings/process", {
+  acceptanceEnabled: true,
+  statusNames: { new: "Новая", in_progress: "В работе", review: "На проверке", done: "Завершена" },
+  cancelledName: "Отменена",
+  employeeSeesColleagues: false,
+  speedFrom: "started",
+  assistantName: "Помощник",
+  assistantModel: "gpt-4.1-mini",
+});
+assert.equal(r.status, 200, JSON.stringify(r.data));
 
 r = await manager("POST", "/api/invites/accept", { token: mInv, login: `mgr-${suffix}`, displayName: "Руководитель Один", password: "manager-pass-1" });
 assert.equal(r.status, 200);
@@ -151,27 +161,45 @@ assert.equal(r.status, 200);
 r = await employee("GET", "/api/me");
 assert.equal(r.data.branch.id, b2);
 
-step("Восстановление пароля кодом от директора");
-r = await director("POST", `/api/members/${empId}/reset-code`, {});
-const resetCode = r.data.code;
-r = await anon("POST", "/api/auth/recover", { login: `emp-${suffix}`, code: "WRONGCODE", password: "new-employee-pass" });
-assert.equal(r.status, 400);
-r = await anon("POST", "/api/auth/recover", { login: `emp-${suffix}`, code: resetCode, password: "new-employee-pass" });
+step("Сброс пароля по одноразовой ссылке от директора");
+r = await director("POST", `/api/members/${empId}/reset-link`, {});
+assert.equal(r.status, 200, JSON.stringify(r.data));
+const resetToken = r.data.resetUrl.split("/reset/")[1];
+r = await anon("GET", `/api/auth/reset?token=${resetToken}`);
+assert.equal(r.data.valid, true);
+r = await anon("POST", "/api/auth/reset", { token: resetToken, password: "short" });
+assert.equal(r.status, 400, "короткий пароль не гасит ссылку");
+r = await anon("POST", "/api/auth/reset", { token: resetToken, password: "new-employee-pass" });
 assert.equal(r.status, 200);
 r = await employee("GET", "/api/me");
 assert.equal(r.status, 401, "старые сессии завершены");
 r = await employee("POST", "/api/auth/login", { login: `emp-${suffix}`, password: "new-employee-pass" });
 assert.equal(r.status, 200);
-r = await anon("POST", "/api/auth/recover", { login: `emp-${suffix}`, code: resetCode, password: "another-pass-123" });
-assert.equal(r.status, 400, "код одноразовый");
+r = await anon("POST", "/api/auth/reset", { token: resetToken, password: "another-pass-123" });
+assert.equal(r.status, 410, "ссылка одноразовая");
+r = await manager("POST", `/api/members/${empId}/reset-link`, {});
+assert.equal(r.status, 403, "руководитель другого филиала не сбрасывает пароль");
 
 step("Отзыв роли действует в открытой сессии");
-r = await director("DELETE", `/api/members/${empId}`);
+r = await director("PATCH", `/api/members/${empId}`, { active: false });
 assert.equal(r.status, 200);
 r = await employee("GET", "/api/me");
 assert.ok([401, 403].includes(r.status));
 r = await employee("POST", "/api/auth/login", { login: `emp-${suffix}`, password: "new-employee-pass" });
 assert.equal(r.status, 403);
+
+step("Возврат доступа и приглашение для существующего аккаунта");
+r = await director("PATCH", `/api/members/${empId}`, { active: true });
+assert.equal(r.status, 200);
+r = await employee("POST", "/api/auth/login", { login: `emp-${suffix}`, password: "new-employee-pass" });
+assert.equal(r.status, 200);
+r = await director("POST", "/api/invites", { role: "employee", branchId: b1, note: "Повторный", ttlHours: 2 });
+const reInv = tokenOf(r.data.inviteUrl);
+r = await anon("GET", `/api/invites/lookup?token=${reInv}`);
+assert.equal(r.data.nameHint, "Повторный");
+r = await anon("POST", "/api/invites/accept-existing", { token: reInv, login: `emp-${suffix}`, password: "new-employee-pass" });
+assert.equal(r.status, 409, "у активного участника второе членство не создаётся");
+r = await director("PATCH", `/api/members/${empId}`, { active: false });
 
 step("Отзыв приглашения");
 r = await director("POST", "/api/invites", { role: "employee", branchId: b1 });

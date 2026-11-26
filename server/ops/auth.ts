@@ -3,11 +3,11 @@ import { z } from "zod";
 import { companyConfig } from "../../config/company";
 import { audit } from "../audit";
 import type { Actor } from "../context";
-import { newId, randomCode, sha256Hex } from "../crypto";
+import { newId, randomToken, sha256Hex } from "../crypto";
 import { getDb, schema } from "../db";
 import { AppError, notFound } from "../errors";
 import { dummyVerify, hashPassword, verifyPassword } from "../password";
-import { assertCanManageMember } from "../permissions";
+import { assertCanResetPassword } from "../permissions";
 import { createSession, revokeAllSessions, revokeSession } from "../session";
 import { assertNotLocked, clearFailures, registerFailure } from "../throttle";
 import { displayNameSchema, passwordSchema } from "./invites";
@@ -50,36 +50,89 @@ export async function logout(actor: Actor) {
 
 // ---------- Восстановление пароля ----------
 
-/** Директор выдаёт одноразовый код восстановления участнику. */
-export async function issueResetCode(actor: Actor, userId: string) {
+/**
+ * Руководитель или директор выдаёт одноразовую ссылку сброса пароля участнику
+ * (если номер WhatsApp не привязан). Ссылка действует resetCodeTtlHours часов.
+ */
+export async function issueResetLink(actor: Actor, userId: string) {
   const db = getDb();
   const membership = await db.query.memberships.findFirst({
-    where: and(
-      eq(schema.memberships.userId, userId),
-      eq(schema.memberships.companyId, actor.company.id),
-      isNull(schema.memberships.revokedAt),
-    ),
+    where: and(eq(schema.memberships.userId, userId), eq(schema.memberships.companyId, actor.company.id)),
+    orderBy: desc(schema.memberships.createdAt),
   });
   if (!membership) throw notFound();
-  assertCanManageMember(actor, { userId, role: membership.role, branchId: membership.branchId });
+  assertCanResetPassword(actor, { userId, role: membership.role, branchId: membership.branchId });
   const now = Date.now();
   await db
     .update(schema.passwordResets)
     .set({ revokedAt: now })
     .where(and(eq(schema.passwordResets.userId, userId), isNull(schema.passwordResets.usedAt), isNull(schema.passwordResets.revokedAt)));
-  const code = randomCode(10);
+  const token = randomToken();
   const expiresAt = now + companyConfig.auth.resetCodeTtlHours * 3600_000;
   await db.insert(schema.passwordResets).values({
     id: newId(),
     userId,
-    codeHash: await sha256Hex(code),
+    codeHash: await sha256Hex(token),
     channel: "director",
     createdBy: actor.user.id,
     expiresAt,
     createdAt: now,
   });
-  await audit({ companyId: actor.company.id, actorId: actor.user.id, action: "password.reset_code_issued", targetType: "user", targetId: userId });
-  return { code, expiresAt };
+  await audit({ companyId: actor.company.id, actorId: actor.user.id, action: "password.reset_link_issued", targetType: "user", targetId: userId });
+  return { token, expiresAt };
+}
+
+export const resetByLinkSchema = z.object({ token: z.string().min(20).max(200), password: passwordSchema });
+
+/** Установка нового пароля по ссылке. Все прежние сессии участника завершаются. */
+export async function resetByLink(input: z.infer<typeof resetByLinkSchema>) {
+  const db = getDb();
+  const now = Date.now();
+  const codeHash = await sha256Hex(input.token);
+  const claim = await db
+    .update(schema.passwordResets)
+    .set({ usedAt: now })
+    .where(
+      and(
+        eq(schema.passwordResets.codeHash, codeHash),
+        eq(schema.passwordResets.channel, "director"),
+        isNull(schema.passwordResets.usedAt),
+        isNull(schema.passwordResets.revokedAt),
+        gt(schema.passwordResets.expiresAt, now),
+      ),
+    )
+    .returning({ userId: schema.passwordResets.userId });
+  if (claim.length !== 1) throw new AppError("reset_link_invalid", 410);
+  const userId = claim[0]!.userId;
+  await db.update(schema.users).set({ passwordHash: await hashPassword(input.password), updatedAt: now }).where(eq(schema.users.id, userId));
+  await revokeAllSessions(userId);
+  await audit({ companyId: null, actorId: userId, action: "password.reset_by_link" });
+  return { ok: true };
+}
+
+/** Проверка ссылки сброса без погашения. */
+export async function checkResetLink(token: string) {
+  if (!token || token.length < 20 || token.length > 200) return { valid: false };
+  const row = await getDb().query.passwordResets.findFirst({
+    where: and(
+      eq(schema.passwordResets.codeHash, await sha256Hex(token)),
+      eq(schema.passwordResets.channel, "director"),
+      isNull(schema.passwordResets.usedAt),
+      isNull(schema.passwordResets.revokedAt),
+      gt(schema.passwordResets.expiresAt, Date.now()),
+    ),
+  });
+  return { valid: Boolean(row) };
+}
+
+/**
+ * Запрос кода восстановления в WhatsApp. Ответ всегда одинаковый, чтобы не раскрывать,
+ * существует ли логин и привязан ли номер. Отправка кода — на этапе подключения WhatsApp.
+ */
+export async function requestRecoveryCode(login: string) {
+  const key = `recover:${login}`;
+  await assertNotLocked(key);
+  return { ok: true };
 }
 
 export const recoverSchema = z.object({

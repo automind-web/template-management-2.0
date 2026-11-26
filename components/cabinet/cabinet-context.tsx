@@ -15,6 +15,7 @@ export type Me = {
     manageCompany: boolean;
     manageIntegrations: boolean;
     manageMembers: boolean;
+    resetPasswords: boolean;
     inviteManagers: boolean;
     inviteEmployees: boolean;
     viewStats: boolean;
@@ -24,16 +25,24 @@ export type Me = {
     acceptResults: boolean;
   };
   statuses: { key: string; name: string; category: string }[];
+  cancelledName: string;
+  dueTime: string;
+  branding: { accent: string; logoUrl: string; fontFamily: string };
   assistantName: string;
 };
+
+/** Выбор в шапке: конкретный филиал или «all» (только у директора). */
+export const ALL = "all";
 
 type CabinetState = {
   me: Me;
   refreshMe: () => Promise<Me | null>;
-  /** Текущий филиал: id или null, если филиалов нет. */
+  /** Текущий выбор: id филиала, «all» или null, если филиалов нет. */
   branchId: string | null;
+  /** Конкретный филиал для создания задач: выбранный или единственный. */
+  concreteBranchId: string | null;
   setBranchId: (id: string) => void;
-  /** Растёт при каждой смене филиала: запросы сверяют его, чтобы запоздалый ответ не попал на экран. */
+  /** Растёт при каждой смене филиала: запоздалый ответ по прежнему филиалу на экран не попадает. */
   branchEpoch: number;
 };
 
@@ -42,9 +51,10 @@ const STORAGE_KEY = "am.branch";
 
 function pickBranch(me: Me, preferred: string | null): string | null {
   if (me.branches.length === 0) return null;
-  if (preferred && me.branches.some((b) => b.id === preferred)) return preferred;
-  if (me.branch && me.branches.some((b) => b.id === me.branch!.id)) return me.branch.id;
-  return me.branches[0]!.id;
+  if (me.branches.length === 1) return me.branches[0]!.id;
+  if (preferred && (preferred === ALL ? me.capabilities.switchBranch : me.branches.some((b) => b.id === preferred))) return preferred;
+  if (me.capabilities.switchBranch) return ALL;
+  return me.branch?.id ?? me.branches[0]!.id;
 }
 
 function readStored(): string | null {
@@ -62,8 +72,7 @@ export function CabinetProvider({ initialMe, children }: { initialMe: Me; childr
 
   // Выбор филиала восстанавливается после загрузки (localStorage доступен только в браузере).
   React.useEffect(() => {
-    const stored = readStored();
-    const next = pickBranch(initialMe, stored);
+    const next = pickBranch(initialMe, readStored());
     setBranch((prev) => (prev === next ? prev : next));
   }, [initialMe]);
 
@@ -88,9 +97,11 @@ export function CabinetProvider({ initialMe, children }: { initialMe: Me; childr
     }
   }, []);
 
+  const concreteBranchId = branchId && branchId !== ALL ? branchId : me.branches.length === 1 ? me.branches[0]!.id : null;
+
   const value = React.useMemo(
-    () => ({ me, refreshMe, branchId, setBranchId, branchEpoch }),
-    [me, refreshMe, branchId, setBranchId, branchEpoch],
+    () => ({ me, refreshMe, branchId, concreteBranchId, setBranchId, branchEpoch }),
+    [me, refreshMe, branchId, concreteBranchId, setBranchId, branchEpoch],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

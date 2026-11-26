@@ -129,7 +129,9 @@ assert.equal(r.data.viewsDiffer, true);
 r = await m1("GET", `/api/tasks?branch=${b1}&view=mine`);
 assert.equal(r.data.items.length, 0);
 r = await director("GET", "/api/tasks");
-assert.equal(r.status, 400, "директору с двумя филиалами нужен конкретный филиал");
+assert.equal(r.data.allBranches, true, "директор по умолчанию видит все филиалы");
+r = await director("POST", "/api/tasks", { opId: op(), title: "Без филиала" });
+assert.equal(r.status, 400, "для создания задачи нужен конкретный филиал");
 r = await director("GET", `/api/tasks?branch=${b1}`);
 assert.equal(r.data.items.length, 2);
 
@@ -205,6 +207,14 @@ assert.equal(r.data.task.status.name, "Завершена");
 assert.equal(r.data.task.overdue, false);
 assert.equal(r.data.history[0].type, "accepted");
 
+step("Срок с временем и время по умолчанию из настроек компании");
+r = await m1("POST", "/api/tasks", { opId: op(), title: "Срок с временем", dueDate: "2026-12-10", dueTime: "18:30" });
+assert.equal(r.data.task.dueTime, "18:30");
+const at = new Date(r.data.task.dueAt);
+assert.equal(at.toISOString().slice(11, 16), "13:30", "18:30 по Алматы = 13:30 UTC");
+r = await m1("GET", `/api/tasks?branch=${b1}&q=${encodeURIComponent("айгерим")}`);
+assert.ok(r.data.items.length >= 1, "поиск по имени исполнителя");
+
 step("История: переназначение и перенос срока с прежними значениями");
 r = await m1("POST", "/api/tasks", { opId: op(), title: "Инвентаризация", assigneeId: e1Id, dueDate: "2026-12-01" });
 const t2 = r.data.task;
@@ -214,8 +224,8 @@ const assigned = r.data.history.find((h) => h.type === "assigned" && h.oldValue)
 assert.equal(assigned.oldValue, "Айгерим Сотрудница-Очень-Длинная-Фамилия");
 assert.equal(assigned.newValue, "Сотрудник Второй");
 const due = r.data.history.find((h) => h.type === "due_changed");
-assert.equal(due.oldValue, "2026-12-01");
-assert.equal(due.newValue, "2026-12-05");
+assert.equal(due.oldValue, "2026-12-01 23:59");
+assert.equal(due.newValue, "2026-12-05 23:59");
 r = await e1("GET", `/api/tasks/${t2.id}`);
 assert.equal(r.status, 404, "после передачи прежний исполнитель задачу не видит");
 r = await e2("GET", `/api/tasks/${t2.id}`);
@@ -234,7 +244,7 @@ r = await m1("POST", `/api/tasks/${t2.id}/restore`, { opId: op(), version: r.dat
 assert.equal(r.status, 200);
 
 step("Отзыв роли: открытая сессия сразу теряет доступ к задачам");
-r = await director("DELETE", `/api/members/${e2Id}`);
+r = await director("PATCH", `/api/members/${e2Id}`, { active: false });
 r = await e2("GET", `/api/tasks/${t2.id}`);
 assert.ok([401, 403].includes(r.status));
 

@@ -62,11 +62,16 @@ export function assertCanInvite(actor: Actor, role: Role, branchId: string | nul
     assertBranchAccess(actor, branchId);
     return;
   }
-  if (isManager(actor) && companyConfig.invitations.managerCanInviteEmployees && role === "employee") {
+  if (managerMayInvite(actor) && role === "employee") {
     if (actor.membership.branchId !== branchId) throw new AppError("branch_forbidden", 403);
     return;
   }
   throw forbidden("invite_role_forbidden");
+}
+
+/** Руководитель приглашает сотрудников своего филиала, если директор не снял флаг «может приглашать». */
+export function managerMayInvite(actor: Actor): boolean {
+  return isManager(actor) && companyConfig.invitations.managerCanInviteEmployees && actor.membership.canInvite;
 }
 
 /** Может ли участник управлять членством (роль, филиал, отзыв) другого участника. */
@@ -74,6 +79,15 @@ export function assertCanManageMember(actor: Actor, target: { userId: string; ro
   if (target.userId === actor.user.id) throw forbidden("cannot_manage_self");
   if (!isDirector(actor)) throw forbidden();
   if (target.role === "director") throw forbidden("cannot_manage_director");
+}
+
+/** Сброс пароля: директор — любому, кроме директоров; руководитель — сотрудникам своего филиала. */
+export function assertCanResetPassword(actor: Actor, target: { userId: string; role: Role; branchId: string | null }): void {
+  if (target.userId === actor.user.id) throw forbidden("cannot_manage_self");
+  if (target.role === "director") throw forbidden("cannot_manage_director");
+  if (isDirector(actor)) return;
+  if (isManager(actor) && target.role === "employee" && target.branchId === actor.membership.branchId) return;
+  throw forbidden();
 }
 
 /** Флаги для интерфейса. Сервер всё равно проверяет каждое действие. */
@@ -85,8 +99,9 @@ export function capabilities(actor: Actor) {
     manageCompany: director,
     manageIntegrations: director,
     manageMembers: director,
+    resetPasswords: director || manager,
     inviteManagers: director,
-    inviteEmployees: director || (manager && companyConfig.invitations.managerCanInviteEmployees),
+    inviteEmployees: director || managerMayInvite(actor),
     viewStats: director || manager,
     viewSystemSettings: director || manager,
     switchBranch: director,

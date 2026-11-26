@@ -1,65 +1,41 @@
-import { AlertTriangle, CalendarClock, CalendarX } from "lucide-react";
-import { Badge } from "@/components/ui/card";
+import { formatShortDateTime } from "@/lib/format";
 import { t } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import type { StatusRef, TransitionInfo } from "./types";
 
-/** Статус различим по подписи, цвет — дополнительный признак. */
-export function StatusBadge({ status, cancelled, className }: { status: StatusRef; cancelled?: boolean; className?: string }) {
-  if (cancelled) {
-    return (
-      <Badge tone="neutral" className={cn("line-through", className)}>
-        {t("tasks.cancelledBadge")}
-      </Badge>
-    );
-  }
-  const tone =
-    status.category === "done" ? "success" : status.category === "review" ? "warning" : status.category === "progress" ? "accent" : "neutral";
+const STATUS_TONE: Record<string, string> = {
+  open: "bg-[#eef0f3] text-[#4b5563] [--dot:#6b7280]",
+  progress: "bg-selected text-primary [--dot:var(--am-accent)]",
+  review: "bg-[#fdf1dc] text-[#9a5b00] [--dot:#d48a1a]",
+  done: "bg-[#e3f5ea] text-[#1f8a46] [--dot:#1f8a46]",
+  cancelled: "bg-[#f3f4f6] text-[#6b7280] [--dot:#9ca3af]",
+};
+
+/** Статус: точка + подпись (различим не только по цвету). */
+export function StatusPill({ status, cancelledName, className }: { status: StatusRef; cancelledName?: string | null; className?: string }) {
+  const tone = cancelledName ? "cancelled" : status.category;
   return (
-    <Badge tone={tone} className={className}>
-      {status.name}
-    </Badge>
+    <span
+      className={cn(
+        "inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-[13px] font-semibold leading-none",
+        STATUS_TONE[tone] ?? STATUS_TONE.open,
+        className,
+      )}
+    >
+      <span aria-hidden className="size-1.5 rounded-full bg-[var(--dot)]" />
+      {cancelledName ?? status.name}
+    </span>
   );
 }
 
-export function formatDueDate(date: string): string {
-  const [y, m, d] = date.split("-");
-  return `${d}.${m}.${y}`;
-}
-
-/** Срок: текст «Просрочено», «Срок: сегодня», «Без срока» — не только цвет. */
-export function DueLabel({
-  dueDate,
-  overdue,
-  today,
-  className,
-}: {
-  dueDate: string | null;
-  overdue: boolean;
-  today?: string;
-  className?: string;
-}) {
-  if (!dueDate) {
-    return (
-      <span className={cn("inline-flex items-center gap-1 text-xs text-muted-foreground", className)}>
-        <CalendarX className="size-3.5" aria-hidden />
-        {t("tasks.due.none")}
-      </span>
-    );
-  }
-  if (overdue) {
-    return (
-      <span className={cn("inline-flex items-center gap-1 text-xs font-medium text-destructive", className)}>
-        <AlertTriangle className="size-3.5" aria-hidden />
-        {t("tasks.due.overdue", { date: formatDueDate(dueDate) })}
-      </span>
-    );
-  }
-  return (
-    <span className={cn("inline-flex items-center gap-1 text-xs text-muted-foreground", className)}>
-      <CalendarClock className="size-3.5" aria-hidden />
-      {today && dueDate === today ? t("tasks.due.today") : t("tasks.due.until", { date: formatDueDate(dueDate) })}
-    </span>
+/** Срок: «Просрочено · 23 нояб., 23:59», «Срок · 25 нояб., 23:59» или «Без срока». */
+export function DueText({ dueAt, overdue, timeZone, className }: { dueAt: number | null; overdue: boolean; timeZone: string; className?: string }) {
+  if (!dueAt) return <span className={cn("text-sm text-muted-foreground", className)}>{t("tasks.due.none")}</span>;
+  const when = formatShortDateTime(dueAt, timeZone);
+  return overdue ? (
+    <span className={cn("text-sm font-semibold text-destructive", className)}>{t("tasks.due.overdue", { date: when })}</span>
+  ) : (
+    <span className={cn("text-sm text-muted-foreground", className)}>{t("tasks.due.until", { date: when })}</span>
   );
 }
 

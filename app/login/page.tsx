@@ -2,7 +2,7 @@
 
 import { useSearchParams } from "next/navigation";
 import * as React from "react";
-import { AuthShell, useSubmit } from "@/components/forms";
+import { AuthShell, TextLink, useSubmit } from "@/components/forms";
 import { Button } from "@/components/ui/button";
 import { Alert, Spinner } from "@/components/ui/card";
 import { Field } from "@/components/ui/field";
@@ -52,6 +52,7 @@ function LoginForm() {
       >
         {reason === "revoked" ? <Alert>{t("login.revoked")}</Alert> : null}
         {reason === "logout" ? <Alert>{t("login.loggedOut")}</Alert> : null}
+        {reason === "reset" ? <Alert tone="success">{t("reset.success")}</Alert> : null}
         {error ? <Alert tone="danger">{error}</Alert> : null}
         <Field label={t("login.login")} error={fieldErrors.login}>
           <Input
@@ -66,28 +67,15 @@ function LoginForm() {
           />
         </Field>
         <Field label={t("login.password")} error={fieldErrors.password}>
-          <Input
-            name="password"
-            type="password"
-            autoComplete="current-password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-          />
+          <Input name="password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
         </Field>
-        <Button type="submit" disabled={pending} className="w-full">
+        <Button type="submit" size="lg" disabled={pending} className="w-full">
           {pending ? <Spinner /> : null}
           {t("login.submit")}
         </Button>
-        <div className="flex flex-col gap-2 text-sm">
-          <a className="text-primary underline-offset-4 hover:underline" href="/recover">
-            {t("login.forgot")}
-          </a>
-          {needsSetup ? (
-            <a className="text-primary underline-offset-4 hover:underline" href="/setup">
-              {t("login.firstRun")}
-            </a>
-          ) : null}
+        <div className="flex flex-col gap-2">
+          <TextLink href="/recover">{t("login.forgot")}</TextLink>
+          {needsSetup ? <TextLink href="/setup">{t("login.firstRun")}</TextLink> : null}
         </div>
       </form>
     </AuthShell>

@@ -53,6 +53,7 @@ route("POST", "/api/setup/owner-invite", async ({ request }) => {
       code: z.string().min(1, "required").max(200),
       companyName: z.string().trim().max(120).optional(),
       timezone: z.string().trim().max(64).optional(),
+      ttlHours: z.number().int().min(1, "ttl_invalid").max(720, "ttl_invalid").optional(),
     }),
   );
   const result = await setup.issueOwnerInvite(input);
@@ -73,9 +74,21 @@ route("POST", "/api/auth/logout", async ({ request }) => {
   return json({ ok: true }, { headers: { "set-cookie": clearSessionCookie(request) } });
 });
 
+route("POST", "/api/auth/recover/request", async ({ request }) => {
+  const input = await readJson(request, z.object({ login: z.string().trim().toLowerCase().min(1, "required").max(40) }));
+  return json(await auth.requestRecoveryCode(input.login));
+});
+
 route("POST", "/api/auth/recover", async ({ request }) => {
   const input = await readJson(request, auth.recoverSchema);
   return json(await auth.recoverPassword(input));
+});
+
+route("GET", "/api/auth/reset", async ({ url }) => json(await auth.checkResetLink(url.searchParams.get("token") ?? "")));
+
+route("POST", "/api/auth/reset", async ({ request }) => {
+  const input = await readJson(request, auth.resetByLinkSchema);
+  return json(await auth.resetByLink(input));
 });
 
 // ---------- Приглашения ----------
@@ -85,6 +98,12 @@ route("GET", "/api/invites/lookup", async ({ url }) => json(await invites.lookup
 route("POST", "/api/invites/accept", async ({ request }) => {
   const input = await readJson(request, invites.acceptInviteSchema);
   const { token } = await invites.acceptInvite(input, ua(request));
+  return json({ ok: true }, { headers: loginCookie(request, token) });
+});
+
+route("POST", "/api/invites/accept-existing", async ({ request }) => {
+  const input = await readJson(request, invites.acceptExistingSchema);
+  const { token } = await invites.acceptInviteExisting(input, ua(request));
   return json({ ok: true }, { headers: loginCookie(request, token) });
 });
 
@@ -124,14 +143,21 @@ route("DELETE", "/api/me/sessions/:id", async ({ request, params }) => {
 
 // ---------- Компания, филиалы, участники ----------
 
-route("PATCH", "/api/company", async ({ request }) => {
+route("GET", "/api/settings", async ({ request }) => json(await org.getSystemSettings(await requireActor(request))));
+
+route("PATCH", "/api/settings/company", async ({ request }) => {
   const actor = await requireActor(request);
   return json(await org.updateCompany(actor, await readJson(request, org.updateCompanySchema)));
 });
 
-route("GET", "/api/branches", async ({ request, url }) =>
-  json({ branches: await org.listBranches(await requireActor(request), url.searchParams.get("archived") === "1") }),
-);
+route("PATCH", "/api/settings/process", async ({ request }) => {
+  const actor = await requireActor(request);
+  return json(await org.updateProcess(actor, await readJson(request, org.updateProcessSchema)));
+});
+
+route("GET", "/api/settings/connections", async ({ request }) => json(await org.connections(await requireActor(request))));
+
+route("GET", "/api/branches", async ({ request }) => json({ branches: await org.listBranches(await requireActor(request)) }));
 
 route("POST", "/api/branches", async ({ request }) => {
   const actor = await requireActor(request);
@@ -156,15 +182,10 @@ route("PATCH", "/api/members/:userId", async ({ request, params }) => {
   return json(await org.updateMember(actor, params.userId!, await readJson(request, org.updateMemberSchema)));
 });
 
-route("DELETE", "/api/members/:userId", async ({ request, params }) =>
-  json(await org.revokeMember(await requireActor(request), params.userId!)),
-);
-
-route("POST", "/api/members/:userId/reset-code", async ({ request, params }) =>
-  json(await auth.issueResetCode(await requireActor(request), params.userId!)),
-);
-
-route("GET", "/api/system/status", async ({ request }) => json(await system.systemStatus(await requireActor(request))));
+route("POST", "/api/members/:userId/reset-link", async ({ request, params }) => {
+  const r = await auth.issueResetLink(await requireActor(request), params.userId!);
+  return json({ resetUrl: `${publicOrigin(request)}/reset/${r.token}`, expiresAt: r.expiresAt });
+});
 
 // ---------- Задачи ----------
 
@@ -188,7 +209,8 @@ route("POST", "/api/tasks", async ({ request }) => {
 route("GET", "/api/tasks/assignees", async ({ request, url }) => {
   const actor = await requireActor(request);
   const branch = url.searchParams.get("branch");
-  return json({ assignees: await tasks.searchAssignees(actor, resolveBranch(actor, branch), url.searchParams.get("q") ?? "") });
+  const scope = branch === "all" ? "all" : resolveBranch(actor, branch);
+  return json({ assignees: await tasks.searchAssignees(actor, scope, url.searchParams.get("q") ?? "") });
 });
 
 route("GET", "/api/tasks/:id", async ({ request, params }) => json(await tasks.getTaskCard(await requireActor(request), params.id!)));

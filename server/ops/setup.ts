@@ -2,8 +2,8 @@
  * Первый запуск: владелец сайта вводит OWNER_ACTIVATION_CODE (секрет сайта)
  * и получает одноразовое приглашение первого директора (по умолчанию 72 часа).
  */
-import { and, eq, isNull } from "drizzle-orm";
-import { companyConfig } from "../../config/company";
+import { and, eq, isNull, sql } from "drizzle-orm";
+import { companyConfig, type TransitionConfig } from "../../config/company";
 import { audit } from "../audit";
 import { newId, randomToken, sha256Hex, timingSafeEqual } from "../crypto";
 import { getDb, schema } from "../db";
@@ -50,34 +50,48 @@ export async function createCompany(name: string, timezone: string): Promise<str
   return id;
 }
 
+/**
+ * Статусы и переходы компании из config/company.ts.
+ * Названия статусов, изменённые в настройках, сохраняются. При отключении приёмки статус
+ * «На проверке» скрывается, но если в нём остались задачи — остаётся с переходами для их закрытия.
+ */
 export async function seedWorkflow(companyId: string, acceptanceEnabled = companyConfig.rules.acceptanceEnabled) {
   const db = getDb();
-  const statuses = acceptanceEnabled
-    ? companyConfig.statuses
-    : companyConfig.statuses.filter((s) => s.category !== "review");
-  const transitions = acceptanceEnabled ? companyConfig.transitions : companyConfig.transitionsWithoutAcceptance;
-  await db.delete(schema.statusTransitions).where(eq(schema.statusTransitions.companyId, companyId));
-  for (const [i, s] of statuses.entries()) {
+  const [{ inReview } = { inReview: 0 }] = await db
+    .select({ inReview: sql<number>`count(*)` })
+    .from(schema.tasks)
+    .where(and(eq(schema.tasks.companyId, companyId), eq(schema.tasks.statusKey, "review")));
+  const keepReview = acceptanceEnabled || Number(inReview) > 0;
+  const now = Date.now();
+  for (const [i, st] of companyConfig.statuses.entries()) {
+    const archived = st.category === "review" && !keepReview ? now : null;
     await db
       .insert(schema.taskStatuses)
-      .values({ companyId, key: s.key, name: s.name, sort: i, category: s.category })
+      .values({ companyId, key: st.key, name: st.name, sort: i, category: st.category, archivedAt: archived })
       .onConflictDoUpdate({
         target: [schema.taskStatuses.companyId, schema.taskStatuses.key],
-        set: { name: s.name, sort: i, category: s.category, archivedAt: null },
+        set: { sort: i, category: st.category, archivedAt: archived },
       });
   }
+  const transitions: TransitionConfig[] = acceptanceEnabled
+    ? [...companyConfig.transitions]
+    : [
+        ...companyConfig.transitionsWithoutAcceptance,
+        ...(keepReview ? companyConfig.transitions.filter((t) => t.from === "review") : []),
+      ];
+  await db.delete(schema.statusTransitions).where(eq(schema.statusTransitions.companyId, companyId));
   for (const t of transitions) {
     await db.insert(schema.statusTransitions).values({
       companyId,
       fromKey: t.from,
       toKey: t.to,
       actorsJson: JSON.stringify(t.actors),
-      requiresJson: JSON.stringify("requires" in t ? (t.requires ?? {}) : {}),
+      requiresJson: JSON.stringify(t.requires ?? {}),
     });
   }
 }
 
-export async function issueOwnerInvite(input: { code: string; companyName?: string; timezone?: string }) {
+export async function issueOwnerInvite(input: { code: string; companyName?: string; timezone?: string; ttlHours?: number }) {
   const expected = getEnv().OWNER_ACTIVATION_CODE?.trim();
   if (!expected) throw new AppError("activation_code_missing", 503);
   if (await hasActiveDirector()) throw new AppError("already_activated", 409);
@@ -116,7 +130,8 @@ export async function issueOwnerInvite(input: { code: string; companyName?: stri
     );
 
   const token = randomToken();
-  const expiresAt = now + companyConfig.invitations.ownerTtlHours * 3600_000;
+  const ttlHours = Math.min(Math.max(Math.round(input.ttlHours ?? companyConfig.invitations.ownerTtlHours), 1), 720);
+  const expiresAt = now + ttlHours * 3600_000;
   const id = newId();
   await db.insert(schema.invitations).values({
     id,

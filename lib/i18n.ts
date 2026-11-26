@@ -1,5 +1,6 @@
 import { companyConfig } from "@/config/company";
 import { messages, type Locale } from "@/i18n/messages";
+import { formatShortDateTime } from "./format";
 
 const locale: Locale = companyConfig.locale;
 
@@ -39,25 +40,7 @@ export function fieldText(code: string | undefined | null): string | undefined {
   return err !== `errors.${code}` ? err : code;
 }
 
-const dateTimeFormat = new Intl.DateTimeFormat("ru-RU", {
-  day: "2-digit",
-  month: "2-digit",
-  year: "numeric",
-  hour: "2-digit",
-  minute: "2-digit",
-  timeZone: companyConfig.timezone,
-});
-
-export function formatDateTime(ms: number, timeZone?: string): string {
-  if (timeZone && timeZone !== companyConfig.timezone) {
-    return new Intl.DateTimeFormat("ru-RU", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-      timeZone,
-    }).format(new Date(ms));
-  }
-  return dateTimeFormat.format(new Date(ms));
+/** Дата и время в поясе браузера (страницы без входа, где пояс компании неизвестен). */
+export function formatDateTime(ms: number): string {
+  return formatShortDateTime(ms, Intl.DateTimeFormat().resolvedOptions().timeZone);
 }

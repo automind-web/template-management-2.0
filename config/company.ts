@@ -21,25 +21,15 @@ export type TransitionConfig = {
 export const companyConfig = {
   /** Название по умолчанию; директор меняет при активации и в настройках. */
   name: "AI Management",
-  /** Путь к логотипу в /public или null (тогда показывается монограмма). */
+  /**
+   * Оформление по умолчанию. Акцент, логотип и шрифт директор меняет в
+   * «Настройки системы → Компания»; остальные цвета — в app/globals.css.
+   */
   logo: null as string | null,
-
   theme: {
     /** Акцентный цвет — только для главного действия, выбранного элемента и фокуса. */
-    accent: "#2563eb",
-    accentForeground: "#ffffff",
-    /** Нейтральная светлая тема. */
-    background: "#f7f7f8",
-    surface: "#ffffff",
-    text: "#18181b",
-    mutedText: "#5b5b66",
-    border: "#e4e4e7",
-    danger: "#c62828",
-    success: "#1f7a3d",
-    warning: "#a15c00",
-    radius: "0.625rem",
-    fontFamily:
-      'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif',
+    accent: "#2f5bea",
+    background: "#f4f5f8",
   },
 
   /** Часовой пояс компании. Срок наступает в конце указанного дня (23:59:59). */
