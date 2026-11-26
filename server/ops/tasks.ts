@@ -84,7 +84,7 @@ async function assertAssignable(actor: Actor, branchId: string, assigneeId: stri
  * Повтор нажатия или доставки с тем же opId не создаёт второго события:
  * возвращается результат первой операции.
  */
-async function runOnce<T extends object>(
+export async function runOnce<T extends object>(
   actor: Actor,
   opId: string | undefined,
   kind: string,

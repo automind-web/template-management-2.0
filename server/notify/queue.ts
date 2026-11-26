@@ -20,10 +20,12 @@ import { sendWebPush } from "./webpush";
 
 type TaskRow = typeof schema.tasks.$inferSelect;
 type Channel = "cabinet" | "whatsapp" | "push";
+/** События уведомлений; «reminder» — личное напоминание, поставленное через помощника. */
+type Event = NotifyEvent | "reminder";
 
 const REMINDER_EVENTS: NotifyEvent[] = ["dueSoon", "overdue"];
 
-function text(event: NotifyEvent, task: TaskRow, tz: string, extra?: string | null): { title: string; body: string } {
+function text(event: Event, task: TaskRow, tz: string, extra?: string | null): { title: string; body: string } {
   const name = `«${task.title}»`;
   switch (event) {
     case "assigned":
@@ -40,6 +42,8 @@ function text(event: NotifyEvent, task: TaskRow, tz: string, extra?: string | nu
       return { title: `Результат принят: ${name}`, body: "" };
     case "comment":
       return { title: `Новый комментарий: ${name}`, body: (extra ?? "").slice(0, 300) };
+    case "reminder":
+      return { title: `Напоминание: ${name}`, body: task.dueAt ? `Срок: ${formatShortDateTime(task.dueAt, tz)}` : "" };
   }
 }
 
@@ -57,20 +61,20 @@ async function enqueue(params: {
   companyId: string;
   userId: string;
   task: TaskRow;
-  event: NotifyEvent;
+  event: Event;
   scheduledAt: number;
   key: string;
   extra?: string | null;
   tz: string;
 }) {
   const prefs = await loadPrefs(params.userId);
-  if (!prefs.events[params.event]) return;
+  if (params.event !== "reminder" && !prefs.events[params.event]) return;
   const { title, body } = text(params.event, params.task, params.tz, params.extra);
   const now = Date.now();
   const db = getDb();
   for (const channel of await channelsFor(params.userId, prefs)) {
     // Событие «сейчас» в кабинете доставляется сразу; остальное — через очередь.
-    const immediate = channel === "cabinet" && params.scheduledAt <= now && !REMINDER_EVENTS.includes(params.event);
+    const immediate = channel === "cabinet" && params.scheduledAt <= now && params.event !== "reminder" && !REMINDER_EVENTS.includes(params.event);
     await db
       .insert(schema.notificationDeliveries)
       .values({
@@ -168,6 +172,13 @@ export async function notifyTask(
   }
 }
 
+/** Личное напоминание по задаче на заданный момент (помощник: «напомни завтра в 10:00»). */
+export async function scheduleReminder(actor: Actor, taskId: string, at: number): Promise<void> {
+  const task = await getDb().query.tasks.findFirst({ where: eq(schema.tasks.id, taskId) });
+  if (!task) return;
+  await enqueue({ companyId: task.companyId, userId: actor.user.id, task, event: "reminder", scheduledAt: at, key: `reminder:${task.id}:${at}`, tz: actor.company.timezone });
+}
+
 export async function afterTaskChange(taskId: string): Promise<void> {
   try {
     await rescheduleReminders(taskId);
@@ -234,7 +245,7 @@ async function deliver(d: Delivery): Promise<{ status: "sent" | "cancelled" | "r
   if (d.taskId) {
     if (!task || !canView(actor, task)) return { status: "cancelled", error: "no_access" };
   }
-  if (task && REMINDER_EVENTS.includes(d.event as NotifyEvent)) {
+  if (task && (d.event === "reminder" || REMINDER_EVENTS.includes(d.event as NotifyEvent))) {
     const wf = await loadWorkflow(task.companyId);
     const open = !task.cancelledAt && wf.byKey.get(task.statusKey)?.category !== "done";
     if (!open || task.assigneeId !== d.userId || task.dueAt === null) return { status: "cancelled", error: "not_relevant" };
@@ -373,7 +384,7 @@ export async function inbox(actor: Actor) {
         eq(schema.notificationDeliveries.userId, actor.user.id),
         eq(schema.notificationDeliveries.channel, "cabinet"),
         eq(schema.notificationDeliveries.status, "pending"),
-        inArray(schema.notificationDeliveries.event, REMINDER_EVENTS),
+        inArray(schema.notificationDeliveries.event, [...REMINDER_EVENTS, "reminder"]),
       ),
     );
   return {

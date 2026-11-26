@@ -17,6 +17,7 @@ import { getEnv } from "./env";
 import { whapiConfigured } from "./whatsapp/whapi";
 import { getDb, schema } from "./db";
 import { newId } from "./crypto";
+import * as assistant from "./assistant/service";
 import * as stats from "./ops/stats";
 import * as tasks from "./ops/tasks";
 import { resolveBranch } from "./permissions";
@@ -332,6 +333,31 @@ route("POST", "/api/push/unsubscribe", async ({ request }) => {
     .where(and(eq(schema.pushSubscriptions.endpoint, input.endpoint), eq(schema.pushSubscriptions.userId, actor.user.id)));
   return json({ ok: true });
 });
+
+// ---------- Помощник ----------
+
+route("GET", "/api/assistant", async ({ request }) => json(await assistant.getChat(await requireActor(request))));
+
+route("POST", "/api/assistant/message", async ({ request }) => {
+  const actor = await requireActor(request);
+  const input = await readJson(request, z.object({ text: z.string().trim().min(1, "required").max(4000), opId: z.string().min(8).max(80).optional() }));
+  return json(await assistant.sendWebMessage(actor, input.text, input.opId));
+});
+
+route("POST", "/api/assistant/voice", async ({ request }) => {
+  const actor = await requireActor(request);
+  let form: FormData;
+  try {
+    form = await request.formData();
+  } catch {
+    throw new AppError("bad_form", 400);
+  }
+  const audio = form.get("audio");
+  if (!(audio instanceof File)) throw new AppError("file_empty", 400);
+  return json({ messages: (await assistant.sendVoice(actor, audio)).messages });
+});
+
+route("DELETE", "/api/assistant", async ({ request }) => json(await assistant.clearChat(await requireActor(request))));
 
 // ---------- Статистика ----------
 

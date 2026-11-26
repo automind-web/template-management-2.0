@@ -18,7 +18,9 @@
     "test": "node --experimental-sqlite --experimental-strip-types --test test/*.test.ts",
     "smoke": "node scripts/smoke.mjs",
     "db:reset:local": "node scripts/reset-local.mjs",
-    "smoke:tasks": "node scripts/smoke-tasks.mjs"
+    "smoke:tasks": "node scripts/smoke-tasks.mjs",
+    "smoke:assistant": "node scripts/smoke-assistant.mjs",
+    "smoke:all": "bash scripts/smoke-all.sh"
   },
   "dependencies": {
     "class-variance-authority": "0.7.1",
