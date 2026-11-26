@@ -10,6 +10,7 @@ import * as invites from "./ops/invites";
 import * as org from "./ops/org";
 import * as setup from "./ops/setup";
 import * as system from "./ops/system";
+import * as stats from "./ops/stats";
 import * as tasks from "./ops/tasks";
 import { resolveBranch } from "./permissions";
 import { sessionTtlMs } from "./session";
@@ -261,6 +262,10 @@ route("GET", "/api/attachments/:id", async ({ request, params }) =>
 route("DELETE", "/api/attachments/:id", async ({ request, params }) =>
   json(await tasks.deleteAttachment(await requireActor(request), params.id!)),
 );
+
+// ---------- Статистика ----------
+
+route("GET", "/api/stats", async ({ request, url }) => json(await stats.getStats(await requireActor(request), stats.parseStatsQuery(url))));
 
 // ---------- Диспетчер ----------
 

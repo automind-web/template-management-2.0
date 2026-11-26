@@ -243,6 +243,24 @@ assert.deepEqual(r.data.items.map((i) => i.id), [t2.id]);
 r = await m1("POST", `/api/tasks/${t2.id}/restore`, { opId: op(), version: r.data.items[0].version });
 assert.equal(r.status, 200);
 
+step("Статистика: просрочка, знаменатель, «поздно» и медиана сверены с исходными задачами");
+const today = new Date().toISOString().slice(0, 10);
+r = await m1("GET", `/api/stats?from=${yesterday}&to=${today}&branch=${b1}`);
+assert.equal(r.status, 200, JSON.stringify(r.data));
+const st = r.data.summary;
+const overdueList = (await m1("GET", `/api/tasks?branch=${b1}&due=overdue`)).data.items.map((i) => i.id).sort();
+assert.deepEqual([...st.overdue.ids].sort(), overdueList, "просрочка = открытые с прошедшим сроком");
+assert.ok(st.late.ids.includes(task.id), "сдана после срока — «поздно»");
+assert.ok(st.done.ids.includes(task.id) && st.done.denomIds.includes(task.id), "срок в периоде наступил — в знаменателе");
+assert.equal(st.done.n + st.notDone.n, st.done.denom, "выполнено + не выполнено = знаменатель");
+assert.ok(st.speed.n >= 1 && st.speed.medianMs !== null, "медиана скорости с числом наблюдений");
+const e1Row = r.data.employees.find((e) => e.userId === e1Id);
+assert.ok(e1Row.late.ids.includes(task.id), "по сотрудникам — тот же расчёт");
+r = await e1("GET", `/api/stats?from=${yesterday}&to=${today}`);
+assert.equal(r.status, 403, "сотруднику статистика недоступна");
+r = await m2("GET", `/api/stats?from=${yesterday}&to=${today}&branch=${b1}`);
+assert.equal(r.status, 403, "руководитель другого филиала — нет доступа");
+
 step("Отзыв роли: открытая сессия сразу теряет доступ к задачам");
 r = await director("PATCH", `/api/members/${e2Id}`, { active: false });
 r = await e2("GET", `/api/tasks/${t2.id}`);
