@@ -68,6 +68,7 @@ const EMPTY: Filters = {
 const SCROLL_KEY = "am.tasks.scroll";
 const CANCELLED = "_cancelled";
 const DUE_KEYS = ["overdue", "today", "week", "has", "none"] as const;
+type MoveOrigin = "action" | "drag";
 
 function readFilters(): Filters {
   if (typeof window === "undefined") return EMPTY;
@@ -119,7 +120,8 @@ function downloadCsv(data: TaskList) {
 
 /**
  * Смена статуса из списка или доски: строка меняется сразу, сервер подтверждает в фоне.
- * Если нужен результат или комментарий — открывается та же форма, что в карточке.
+ * Перетаскивание меняет только статус и никогда не открывает форму.
+ * Явная кнопка действия может запросить результат или комментарий.
  */
 function useMove() {
   const { me } = useCabinet();
@@ -141,14 +143,14 @@ function useMove() {
   };
 
   const move = React.useCallback(
-    async (item: TaskListItem, to: string, statuses: TaskList["statuses"]) => {
+    async (item: TaskListItem, to: string, statuses: TaskList["statuses"], origin: MoveOrigin = "action") => {
       if (taskIsSaving(item.id)) return;
       const m = item.moves.find((x) => x.to === to);
       if (!m) {
         toast(t("tasks.board.forbidden"), "danger");
         return;
       }
-      if (m.needsForm) {
+      if (m.needsForm && origin !== "drag") {
         try {
           const card = await loadCard(item.id);
           const transition = card.transitions.find((tr) => tr.to === to);
@@ -194,7 +196,14 @@ function useMove() {
         if (current) applyCard(current, me.user.id);
         else patchItem(item.id, before);
         mark(item.id, "danger");
-        toast(errorText(e instanceof ApiError ? e.code : "network"), "danger");
+        const code = e instanceof ApiError ? e.code : "network";
+        const needsDetails = ["comment_required", "result_required", "attachment_required"].includes(code);
+        toast(
+          origin === "drag" && needsDetails
+            ? t("tasks.board.completeInCard", { reason: errorText(code) })
+            : errorText(code),
+          "danger",
+        );
       } finally {
         setTaskSaving(item.id, false);
       }
@@ -341,7 +350,7 @@ export default function TasksPage() {
   const view = data?.view ?? (filters.view || "mine");
   const board = filters.layout === "board";
   const statuses = data?.statuses ?? me.statuses;
-  const move = (item: TaskListItem, to: string) => void mover.move(item, to, statuses);
+  const move = (item: TaskListItem, to: string, origin: MoveOrigin = "action") => void mover.move(item, to, statuses, origin);
 
   return (
     <>
@@ -971,7 +980,7 @@ function Board({
 }: {
   data: TaskList;
   onOpen: () => void;
-  move: (item: TaskListItem, to: string) => void;
+  move: (item: TaskListItem, to: string, origin?: MoveOrigin) => void;
   flash: Record<string, "success" | "danger">;
 }) {
   const items = data.items.filter((i) => !i.cancelled);
@@ -1009,7 +1018,7 @@ function Board({
                 const task = dragging;
                 setDragging(null);
                 setOver(null);
-                if (task && task.status.key !== s.key) move(task, s.key);
+                if (task && task.status.key !== s.key) move(task, s.key, "drag");
               }}
               className={cn(
                 "min-w-0 rounded-xl border border-border bg-muted/70 p-2.5 transition-[background-color,opacity,box-shadow,transform] duration-200",
