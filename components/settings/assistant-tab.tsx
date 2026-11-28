@@ -63,7 +63,7 @@ function KeyField({
           <Button variant="ghost" size="sm" onClick={() => onChange({ mode: "edit", value: "" })}>
             {t("assistantSettings.replace")}
           </Button>
-          <Button variant="ghost" size="sm" className="text-destructive" onClick={() => onChange({ mode: "remove" })}>
+          <Button variant="ghost" size="sm" className="text-danger" onClick={() => onChange({ mode: "remove" })}>
             {t("assistantSettings.disconnect")}
           </Button>
         </div>
@@ -101,10 +101,10 @@ function StatusPill({ status }: { status: string }) {
     <span
       className={cn(
         "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold",
-        ok ? "bg-success/10 text-success" : neutral ? "bg-muted text-foreground/55" : "bg-destructive/10 text-destructive",
+        ok ? "bg-success/10 text-success" : neutral ? "bg-muted text-foreground/55" : "bg-danger/10 text-danger",
       )}
     >
-      <span className={cn("size-1.5 rounded-full", ok ? "bg-success" : neutral ? "bg-foreground/35" : "bg-destructive")} />
+      <span className={cn("size-1.5 rounded-full", ok ? "bg-success" : neutral ? "bg-foreground/35" : "bg-danger")} />
       {t(`assistantSettings.status.${status}`)}
     </span>
   );
@@ -153,25 +153,25 @@ function AssistantForm({ data, onSaved }: { data: Settings; onSaved: (s: Setting
         void run();
       }}
     >
-      <Card className="relative overflow-hidden border-0 bg-gradient-to-br from-primary to-[#1b2f86] p-5 text-white">
-        <div aria-hidden className="absolute -right-16 -top-16 size-56 rounded-full bg-white/10 blur-xl" />
-        <div className="relative flex flex-col gap-4">
+      <Card className="rise-in relative overflow-hidden p-0">
+        <div aria-hidden className="absolute inset-0 bg-[radial-gradient(90%_140%_at_100%_0%,color-mix(in_oklab,var(--am-accent)_14%,transparent),transparent_60%)]" />
+        <div className="relative grid gap-4 p-5 sm:p-6">
           <div className="flex items-center gap-3">
-            <span className="flex size-11 items-center justify-center rounded-xl bg-white/15">
-              <Bot className="size-6" />
+            <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-primary text-primary-foreground shadow-lg shadow-primary/25">
+              <Bot className="size-5" />
             </span>
             <div>
               <h2 className="text-lg font-bold">{t("assistantSettings.heroTitle")}</h2>
-              <p className="text-sm text-white/75">{t("assistantSettings.heroText")}</p>
+              <p className="text-sm text-muted-foreground">{t("assistantSettings.heroText")}</p>
             </div>
           </div>
           <ol className="grid gap-2 sm:grid-cols-3">
             {steps.map((s, i) => (
-              <li key={s.label} className="flex items-center gap-2.5 rounded-xl bg-white/10 px-3 py-2.5 text-sm">
-                <span className={cn("flex size-6 shrink-0 items-center justify-center rounded-full text-xs font-bold", s.done ? "bg-white text-primary" : "bg-white/20")}>
-                  {s.done ? <Check className="size-3.5" /> : i + 1}
+              <li key={s.label} className={cn("flex h-full items-center gap-3 rounded-xl border p-3", s.done ? "border-success/30 bg-success/5" : "border-border bg-surface")}>
+                <span className={cn("grid size-8 shrink-0 place-items-center rounded-full text-sm font-bold", s.done ? "bg-success text-white" : "bg-primary/10 text-primary")}>
+                  {s.done ? <Check className="size-4" /> : i + 1}
                 </span>
-                {s.label}
+                <span className={cn("text-sm font-semibold", s.done && "text-muted-foreground")}>{s.label}</span>
               </li>
             ))}
           </ol>

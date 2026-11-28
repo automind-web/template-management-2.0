@@ -50,6 +50,7 @@ export function hotkeyList(mac: boolean) {
     { keys: "/", action: "hotkeys.search", where: "hotkeys.onList" },
     { keys: mac ? "⌘+Return" : "Ctrl+Enter", action: "hotkeys.save", where: "hotkeys.inForm" },
     { keys: "Esc", action: "hotkeys.close", where: "hotkeys.inDialog" },
+    { keys: mac ? "⌘+B" : "Ctrl+B", action: "hotkeys.toggleNav", where: "hotkeys.onDesktop" },
     { keys: "?", action: "hotkeys.help", where: "hotkeys.everywhere" },
   ] as const;
 }

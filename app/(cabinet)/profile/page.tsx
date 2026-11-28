@@ -25,15 +25,13 @@ export default function ProfilePage() {
     <>
       <PageHeader title={t("profile.title")} />
       <PageBody className="flex max-w-3xl flex-col gap-4">
-        <Card className="relative overflow-hidden border-0 bg-gradient-to-br from-primary to-[#1b2f86] p-5 text-white sm:p-6">
-          <div aria-hidden className="absolute -right-12 -top-12 size-48 rounded-full bg-white/10 blur-xl" />
-          <div className="relative flex items-center gap-4">
-            <span className="rounded-full ring-4 ring-white/25">
-              <Avatar name={me.user.displayName} size={64} />
-            </span>
+        <Card className="rise-in relative overflow-hidden p-0">
+          <div aria-hidden className="absolute inset-0 bg-[radial-gradient(90%_140%_at_100%_0%,color-mix(in_oklab,var(--am-accent)_14%,transparent),transparent_60%)]" />
+          <div className="relative flex items-center gap-4 p-5 sm:p-6">
+            <Avatar name={me.user.displayName} size={60} className="shadow-lg shadow-primary/25" />
             <div className="min-w-0">
-              <p className="truncate text-xl font-bold">{me.user.displayName}</p>
-              <p className="truncate text-sm text-white/80">
+              <p className="truncate text-2xl font-bold tracking-tight">{me.user.displayName}</p>
+              <p className="truncate text-sm text-muted-foreground">
                 {[t(`roles.${me.role}`), me.role === "director" ? me.company.name : me.branch?.name].filter(Boolean).join(" · ")}
               </p>
             </div>

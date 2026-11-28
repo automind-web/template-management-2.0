@@ -1,8 +1,11 @@
 @import "tailwindcss";
 
+/* Свёрнутое боковое меню на ПК: состояние ставится на <html> до отрисовки (app/layout.tsx). */
+@custom-variant nav-collapsed (&:where(html[data-nav="collapsed"] *));
+
 /*
- * Единые правила оформления. Акцентный цвет, логотип и шрифт задаются в
- * «Настройки системы → Компания» и подставляются в app/layout.tsx.
+ * Единые токены оформления — те же, что в шаблоне продаж 2.0.
+ * Фирменный цвет и шрифт задаются в «Настройки → Компания» и подставляются в app/layout.tsx.
  */
 @theme inline {
   --color-background: var(--am-background);
@@ -11,59 +14,73 @@
   --color-muted-foreground: var(--am-muted-text);
   --color-muted: var(--am-muted);
   --color-border: var(--am-border);
-  --color-input: var(--am-input);
+  --color-input: var(--am-border);
   --color-primary: var(--am-accent);
   --color-primary-foreground: var(--am-accent-foreground);
   --color-selected: var(--am-selected);
+  --color-selected-foreground: var(--am-selected-text);
   --color-ring: var(--am-accent);
   --color-destructive: var(--am-danger);
+  --color-danger: var(--am-danger);
   --color-success: var(--am-success);
   --color-warning: var(--am-warning);
-  --radius-lg: var(--am-radius);
-  --radius-md: calc(var(--am-radius) - 2px);
-  --radius-sm: calc(var(--am-radius) - 4px);
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
   --font-sans: var(--am-font);
 }
 
 :root {
   --am-background: #f4f5f8;
   --am-surface: #ffffff;
-  --am-text: #1c1e24;
-  --am-muted-text: #6b7280;
-  --am-muted: #f1f3f6;
-  --am-border: #e6e8ec;
-  --am-input: #d9dde3;
+  --am-text: #1d2433;
+  --am-muted-text: #6b7385;
+  --am-muted: #f1f3f7;
+  --am-border: #e2e5eb;
   --am-accent: #2f5bea;
   --am-accent-foreground: #ffffff;
-  --am-selected: color-mix(in srgb, var(--am-accent) 11%, white);
-  --am-danger: #d32f2f;
-  --am-success: #1f8a46;
-  --am-warning: #a15c00;
-  --am-radius: 0.75rem;
-  --am-font: "Inter", "Noto Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  --am-selected: color-mix(in oklab, var(--am-accent) 13%, white);
+  --am-selected-text: color-mix(in oklab, var(--am-accent) 75%, black);
+  --am-danger: #d0312d;
+  --am-success: #1f8a4c;
+  --am-warning: #b8650a;
+  --am-font: "Inter", "Segoe UI", system-ui, -apple-system, Roboto, "Helvetica Neue", Arial, sans-serif;
+  /* Компактная плотность, как в шаблоне продаж. */
+  --control-h: 2.5rem;
+  --text-base-size: 14px;
+  --tabbar-h: calc(64px + env(safe-area-inset-bottom, 0px));
   color-scheme: light;
 }
 
-html,
+html {
+  font-size: var(--text-base-size);
+  -webkit-text-size-adjust: 100%;
+}
+
 body {
   background: var(--am-background);
   color: var(--am-text);
   font-family: var(--am-font);
+  margin: 0;
+  min-height: 100vh;
+  line-height: 1.45;
   -webkit-tap-highlight-color: transparent;
 }
 
-/* Видимый фокус для клавиатуры на всех интерактивных элементах. */
-:focus-visible {
+/* Видимый фокус для клавиатуры — одно правило на всё приложение. */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
   outline: 2px solid var(--am-accent);
   outline-offset: 2px;
 }
 
-input:focus-visible,
-textarea:focus-visible,
-select:focus-visible {
-  outline: none;
-  border-color: var(--am-accent);
-  box-shadow: 0 0 0 1px var(--am-accent);
+/* Длинные имена и названия переносятся, а не ломают раскладку на телефоне. */
+.break-anywhere {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.control-h {
+  height: var(--control-h);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -71,13 +88,14 @@ select:focus-visible {
   *::before,
   *::after {
     animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
 }
 
-/* Плавное появление содержимого и всплывающих сообщений. */
-@keyframes am-fade-up {
+/* --- Движение интерфейса: мягкое появление страниц и блоков ----------------- */
+@keyframes page-in {
   from {
     opacity: 0;
     transform: translateY(6px);
@@ -87,17 +105,47 @@ select:focus-visible {
     transform: none;
   }
 }
-@keyframes am-pop {
+
+.page-in {
+  animation: page-in 180ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+/* Блоки страницы появляются по очереди: style={{ "--i": n }} */
+.rise-in {
+  animation: page-in 240ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  animation-delay: calc(min(var(--i, 0), 6) * 25ms);
+}
+
+/* Появление карточки в новой колонке доски и всплывающих меню. */
+@keyframes card-in {
   from {
     opacity: 0;
-    transform: translateY(-8px) scale(0.98);
+    transform: translateY(-6px) scale(0.98);
   }
   to {
     opacity: 1;
     transform: none;
   }
 }
-@keyframes am-shimmer {
+
+.card-in {
+  animation: card-in 220ms ease-out both;
+}
+
+@keyframes live-dot {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in oklab, var(--am-success) 55%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 7px transparent;
+  }
+}
+
+.live-dot {
+  animation: live-dot 1.8s ease-out infinite;
+}
+
+@keyframes shimmer {
   from {
     background-position: -200% 0;
   }
@@ -105,26 +153,38 @@ select:focus-visible {
     background-position: 200% 0;
   }
 }
-.am-fade-up {
-  animation: am-fade-up 0.28s ease-out both;
-}
-.am-pop {
-  animation: am-pop 0.22s ease-out both;
-}
-.am-skeleton {
-  background: linear-gradient(90deg, var(--am-muted) 25%, #e9ecf1 50%, var(--am-muted) 75%);
+
+.skeleton {
+  background: linear-gradient(90deg, var(--am-muted) 25%, color-mix(in oklab, var(--am-muted) 40%, white) 50%, var(--am-muted) 75%);
   background-size: 200% 100%;
-  animation: am-shimmer 1.4s linear infinite;
+  animation: shimmer 1.4s linear infinite;
 }
-.am-lift {
+
+/* Карточки-плитки: лёгкий подъём при наведении. */
+.lift {
   transition:
-    transform 0.15s ease,
-    box-shadow 0.15s ease,
-    border-color 0.15s ease;
+    transform 180ms ease,
+    box-shadow 180ms ease;
 }
-.am-lift:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 6px 18px rgba(16, 24, 40, 0.08);
+
+.lift:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 28px -14px #1d243340;
+}
+
+@keyframes sheet-up {
+  from {
+    transform: translateY(24px);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+.sheet-up {
+  animation: sheet-up 220ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
 }
 
 .pb-safe {

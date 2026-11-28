@@ -1,23 +1,14 @@
 import { cn } from "@/lib/utils";
 
-const PALETTE = ["#2f5bea", "#0e9f6e", "#d97706", "#db2777", "#7c3aed", "#0891b2", "#dc2626", "#4f46e5"];
-
-/** Аватар с инициалами: цвет постоянный для имени. */
+/** Аватар с инициалами — как в шаблоне продаж: фирменный градиент. */
 export function Avatar({ name, size = 32, className }: { name: string; size?: number; className?: string }) {
-  const initials =
-    name
-      .trim()
-      .split(/\s+/)
-      .slice(0, 2)
-      .map((w) => w.charAt(0).toUpperCase())
-      .join("") || "?";
-  let hash = 0;
-  for (const ch of name) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
+  const parts = name.trim().split(/\s+/);
+  const initials = ((parts[0]?.[0] ?? "") + (parts[1]?.[0] ?? "")).toUpperCase() || "?";
   return (
     <span
       aria-hidden
-      className={cn("inline-flex shrink-0 items-center justify-center rounded-full font-semibold text-white", className)}
-      style={{ width: size, height: size, fontSize: Math.round(size * 0.38), background: PALETTE[hash % PALETTE.length] }}
+      className={cn("inline-grid shrink-0 place-items-center rounded-full bg-gradient-to-br from-primary to-primary/70 font-bold text-primary-foreground", className)}
+      style={{ width: size, height: size, fontSize: Math.max(10, Math.round(size * 0.36)) }}
     >
       {initials}
     </span>

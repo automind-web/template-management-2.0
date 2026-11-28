@@ -15,7 +15,8 @@ import { StatusDialog } from "@/components/tasks/task-dialogs";
 import type { TaskCard, TaskList, TaskListItem, TransitionInfo } from "@/components/tasks/types";
 import { useTaskAction } from "@/components/tasks/use-task";
 import { Avatar } from "@/components/ui/avatar";
-import { Button, Kbd } from "@/components/ui/button";
+import { Button, Chip, Kbd } from "@/components/ui/button";
+import { StatTile } from "@/components/ui/stat-tile";
 import { Card, Spinner } from "@/components/ui/card";
 import { NativeSelect } from "@/components/ui/input";
 import { api, ApiError } from "@/lib/api";
@@ -235,7 +236,7 @@ export default function TasksPage() {
               onBlur={() => searchDraft.trim() !== filters.q && set({ q: searchDraft.trim() })}
               placeholder={t("tasks.search")}
               aria-label={t("tasks.search")}
-              className="h-10 w-full rounded-lg border border-input bg-surface pl-9 pr-10 text-[15px] placeholder:text-muted-foreground/80"
+              className="control-h w-full rounded-lg border border-input bg-surface pl-9 pr-10 text-sm font-medium placeholder:font-normal placeholder:text-muted-foreground"
             />
             <Kbd className="absolute right-2.5 text-muted-foreground">/</Kbd>
           </form>
@@ -254,7 +255,7 @@ export default function TasksPage() {
                 aria-label={label}
                 title={label}
                 onClick={() => set({ layout: value })}
-                className={cn("flex size-9 items-center justify-center rounded-md", filters.layout === value ? "bg-selected text-primary" : "text-foreground/70 hover:bg-muted")}
+                className={cn("flex size-8 cursor-pointer items-center justify-center rounded-md transition-colors", filters.layout === value ? "bg-selected text-selected-foreground" : "text-foreground/60 hover:bg-muted")}
               >
                 <Icon className="size-[18px]" />
               </button>
@@ -269,7 +270,7 @@ export default function TasksPage() {
                   type="button"
                   aria-pressed={view === v}
                   onClick={() => set({ view: v })}
-                  className={cn("h-9 rounded-md px-3.5 text-[15px] font-semibold", view === v ? "bg-selected text-foreground" : "text-foreground/70 hover:bg-muted")}
+                  className={cn("h-8 cursor-pointer rounded-md px-3 text-[13px] font-semibold transition-colors", view === v ? "bg-selected text-selected-foreground" : "text-foreground/70 hover:bg-muted")}
                 >
                   {t(`tasks.views.${v}`)}
                 </button>
@@ -277,7 +278,7 @@ export default function TasksPage() {
             </div>
           ) : null}
 
-          <Button onClick={() => setCreating(true)} className="h-10">
+          <Button onClick={() => setCreating(true)}>
             <Plus />
             {t("tasks.create")}
           </Button>
@@ -395,18 +396,9 @@ export default function TasksPage() {
 
 function StatusChip({ label, count, active, onClick }: { label: string; count?: number; active: boolean; onClick: () => void }) {
   return (
-    <button
-      type="button"
-      aria-pressed={active}
-      onClick={onClick}
-      className={cn(
-        "inline-flex h-9 items-center gap-1.5 rounded-full border px-3 text-sm font-semibold",
-        active ? "border-primary bg-selected text-foreground" : "border-border bg-surface text-foreground/80 hover:bg-muted",
-      )}
-    >
+    <Chip selected={active} count={count ?? "·"} onClick={onClick}>
       {label}
-      <span className="font-medium text-muted-foreground">{count ?? "·"}</span>
-    </button>
+    </Chip>
   );
 }
 
@@ -439,37 +431,45 @@ function Overview({
   const sum = (cats: string[]) => statuses.filter((s) => cats.includes(s.category)).reduce((n, s) => n + (data?.counts.byStatus[s.key] ?? 0), 0);
   const first = (cat: string) => statuses.find((s) => s.category === cat)?.key ?? "";
   const review = first("review");
-  const tiles = [
-    { key: "work", icon: Clock3, value: sum(["open", "progress"]), label: t("tasks.overview.work"), tone: "text-primary bg-selected", active: false, onClick: () => set({ status: "", due: "" }) },
-    { key: "overdue", icon: AlertTriangle, value: data?.counts.overdue ?? 0, label: t("tasks.overview.overdue"), tone: "text-destructive bg-destructive/10", active: filters.due === "overdue", onClick: () => set({ due: filters.due === "overdue" ? "" : "overdue", status: "" }) },
-    ...(review
-      ? [{ key: "review", icon: Eye, value: sum(["review"]), label: t("tasks.overview.review"), tone: "text-[#b45309] bg-[#fef3c7]", active: filters.status === review, onClick: () => set({ status: filters.status === review ? "" : review, due: "" }) }]
-      : []),
-    { key: "done", icon: CheckCircle2, value: sum(["done"]), label: t("tasks.overview.done"), tone: "text-success bg-success/10", active: filters.status === first("done"), onClick: () => set({ status: filters.status === first("done") ? "" : first("done"), due: "" }) },
-  ];
+  const loading = !data;
   return (
-    <div className={cn("grid grid-cols-2 gap-3", tiles.length === 4 ? "lg:grid-cols-4" : "lg:grid-cols-3")}>
-      {tiles.map(({ key, icon: Icon, value, label, tone, active, onClick }, i) => (
-        <button
-          key={key}
-          type="button"
-          onClick={onClick}
-          aria-pressed={active}
-          style={{ animationDelay: `${i * 50}ms` }}
-          className={cn(
-            "am-lift am-fade-up flex items-center gap-3 rounded-xl border bg-surface p-3.5 text-left shadow-[0_1px_3px_rgba(16,24,40,0.05)]",
-            active ? "border-primary ring-2 ring-primary/15" : "border-border",
-          )}
-        >
-          <span className={cn("flex size-10 shrink-0 items-center justify-center rounded-xl", tone)}>
-            <Icon className="size-5" />
-          </span>
-          <span className="min-w-0">
-            <span className="block text-2xl font-bold leading-tight tabular-nums">{data ? value : "–"}</span>
-            <span className="block truncate text-sm text-muted-foreground">{label}</span>
-          </span>
-        </button>
-      ))}
+    <div className={cn("grid grid-cols-2 gap-3", review ? "lg:grid-cols-4" : "lg:grid-cols-3")}>
+      <StatTile index={0} icon={Clock3} label={t("tasks.overview.work")} value={sum(["open", "progress"])} hint={t("tasks.overview.workHint")} loading={loading} onClick={() => set({ status: "", due: "" })} />
+      <StatTile
+        index={1}
+        icon={AlertTriangle}
+        tone="danger"
+        label={t("tasks.overview.overdue")}
+        value={data?.counts.overdue ?? 0}
+        hint={t("tasks.overview.overdueHint")}
+        loading={loading}
+        active={filters.due === "overdue"}
+        onClick={() => set({ due: filters.due === "overdue" ? "" : "overdue", status: "" })}
+      />
+      {review ? (
+        <StatTile
+          index={2}
+          icon={Eye}
+          tone="warning"
+          label={t("tasks.overview.review")}
+          value={sum(["review"])}
+          hint={t("tasks.overview.reviewHint")}
+          loading={loading}
+          active={filters.status === review}
+          onClick={() => set({ status: filters.status === review ? "" : review, due: "" })}
+        />
+      ) : null}
+      <StatTile
+        index={3}
+        icon={CheckCircle2}
+        tone="success"
+        label={t("tasks.overview.done")}
+        value={sum(["done"])}
+        hint={t("tasks.overview.doneHint")}
+        loading={loading}
+        active={filters.status === first("done")}
+        onClick={() => set({ status: filters.status === first("done") ? "" : first("done"), due: "" })}
+      />
     </div>
   );
 }
@@ -484,8 +484,8 @@ function TaskTable({ data, onOpen }: { data: TaskList; onOpen: () => void }) {
   return (
     <>
       <Card className="hidden overflow-hidden md:block">
-        <table className="w-full table-fixed border-collapse text-[15px]">
-          <thead className="bg-muted/60 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        <table className="w-full table-fixed border-collapse text-sm">
+          <thead className="bg-muted/70 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             <tr>
               <th className="w-16 px-4 py-3">№</th>
               <th className="px-4 py-3">{t("tasks.columns.title")}</th>
@@ -501,10 +501,10 @@ function TaskTable({ data, onOpen }: { data: TaskList; onOpen: () => void }) {
                 tabIndex={0}
                 onClick={() => open(task.id)}
                 onKeyDown={(e) => e.key === "Enter" && open(task.id)}
-                className={cn("cursor-pointer border-t border-border hover:bg-muted/50 focus-visible:bg-selected", task.cancelled && "opacity-70")}
+                className={cn("cursor-pointer border-t border-border hover:bg-muted/60 focus-visible:bg-selected/60", task.cancelled && "opacity-70")}
               >
-                <td className="px-4 py-3.5 text-muted-foreground">#{task.number}</td>
-                <td className="px-4 py-3.5 font-semibold">
+                <td className="px-4 py-3 text-muted-foreground">#{task.number}</td>
+                <td className="px-4 py-3 font-bold">
                   <Link href={`/tasks/${task.id}`} onClick={(e) => {
                       e.stopPropagation();
                       onOpen();
@@ -512,13 +512,13 @@ function TaskTable({ data, onOpen }: { data: TaskList; onOpen: () => void }) {
                     {task.title}
                   </Link>
                 </td>
-                <td className="px-4 py-3.5">
+                <td className="px-4 py-3">
                   <AssigneeCell item={task} allBranches={data.allBranches} />
                 </td>
-                <td className="px-4 py-3.5">
+                <td className="px-4 py-3">
                   <DueText dueAt={task.dueAt} overdue={task.overdue} timeZone={data.timezone} />
                 </td>
-                <td className="px-4 py-3.5">
+                <td className="px-4 py-3">
                   <StatusPill status={task.status} cancelledName={task.cancelled ? data.cancelledName : null} />
                 </td>
               </tr>
@@ -530,9 +530,9 @@ function TaskTable({ data, onOpen }: { data: TaskList; onOpen: () => void }) {
         {data.items.map((task) => (
           <li key={task.id}>
             <Link href={`/tasks/${task.id}`} onClick={onOpen} className="block rounded-lg">
-              <Card className={cn("flex flex-col gap-1.5 p-3.5", task.cancelled && "opacity-70")}>
+              <Card className={cn("card-in flex flex-col gap-1.5 rounded-xl p-3.5", task.cancelled && "opacity-70")}>
                 <div className="flex items-start justify-between gap-3">
-                  <p className="min-w-0 break-words font-semibold">{task.title}</p>
+                  <p className="min-w-0 font-bold break-anywhere">{task.title}</p>
                   <span className="shrink-0 text-sm text-muted-foreground">#{task.number}</span>
                 </div>
                 <p className="text-sm text-foreground/80">
@@ -608,7 +608,7 @@ function Board({ data, onOpen, onChanged }: { data: TaskList; onOpen: () => void
   return (
     <div className="flex flex-col gap-3">
       {message ? (
-        <p role={message.tone === "danger" ? "alert" : "status"} className={cn("text-sm font-semibold", message.tone === "danger" ? "text-destructive" : "text-success")}>
+        <p role={message.tone === "danger" ? "alert" : "status"} className={cn("text-sm font-semibold", message.tone === "danger" ? "text-danger" : "text-success")}>
           {message.text}
         </p>
       ) : null}
@@ -636,13 +636,13 @@ function Board({ data, onOpen, onChanged }: { data: TaskList; onOpen: () => void
                   if (dragging) void drop(dragging, s.key);
                 }}
                 className={cn(
-                  "rounded-xl border p-2 transition-colors",
-                  dragging && canDrop ? "border-primary/50 bg-selected/60" : "border-border bg-muted/50",
+                  "rounded-xl border border-border bg-muted/70 p-2.5 transition-[background-color,opacity,box-shadow]",
+                  dragging && canDrop && "bg-selected/70 ring-2 ring-primary/60",
                   dragging && !canDrop && !isSource && "opacity-50",
-                  over === s.key && "border-primary bg-selected",
+                  over === s.key && canDrop && "ring-primary",
                 )}
               >
-                <h2 className="flex items-center gap-2 px-1.5 pb-2 pt-1 text-[15px] font-bold">
+                <h2 className="flex items-center gap-2 px-1.5 pb-2.5 pt-1 text-[15px] font-bold">
                   {s.name} <span className="font-semibold text-muted-foreground">{col.length}</span>
                 </h2>
                 <ul className="flex flex-col gap-2">
@@ -759,14 +759,14 @@ function BoardCard({
       onDragEnd={onDragEnd}
       aria-busy={pending}
       className={cn(
-        "relative p-3 shadow-sm",
+        "card-in relative rounded-xl p-3.5 shadow-[0_1px_2px_rgba(16,24,40,0.06)] transition-shadow hover:shadow-md",
         task.moves.length > 0 && "cursor-grab active:cursor-grabbing",
         dragging && "opacity-50 ring-2 ring-primary",
         pending && "opacity-70",
       )}
     >
       <div className="flex items-start gap-2">
-        <Link href={`/tasks/${task.id}`} onClick={onOpen} draggable={false} className="min-w-0 flex-1 break-words font-semibold leading-snug after:absolute after:inset-0">
+        <Link href={`/tasks/${task.id}`} onClick={onOpen} draggable={false} className="min-w-0 flex-1 font-bold leading-snug break-anywhere after:absolute after:inset-0">
           {task.title}
         </Link>
         {pending ? <Spinner className="relative z-10 mt-1 text-primary" /> : null}
@@ -808,7 +808,7 @@ function BoardCard({
         <span className="shrink-0 text-muted-foreground">#{task.number}</span>
       </div>
       <DueText dueAt={task.dueAt} overdue={task.overdue} timeZone={data.timezone} className="mt-1 block" />
-      {error ? <p className="relative z-10 mt-1 text-xs text-destructive">{error}</p> : null}
+      {error ? <p className="relative z-10 mt-1 text-xs text-danger">{error}</p> : null}
       {card ? (
         <StatusDialog card={card} transition={dialog} open={Boolean(dialog)} onOpenChange={(o) => !o && setDialog(null)} act={act} setCard={setCard} onDone={() => onChanged()} />
       ) : null}

@@ -1,37 +1,41 @@
 "use client";
 
-import { CheckCircle2, XCircle } from "lucide-react";
 import * as React from "react";
 import { cn } from "@/lib/utils";
 
 type Toast = { id: number; tone: "success" | "danger"; text: string };
 const Ctx = React.createContext<(text: string, tone?: Toast["tone"]) => void>(() => {});
 
-/** Короткие сообщения об успехе и ошибках в углу экрана. */
+/** Короткое сообщение внизу экрана, как в шаблоне продаж; читается экранным диктором. */
 export function ToastProvider({ children }: { children: React.ReactNode }) {
-  const [items, setItems] = React.useState<Toast[]>([]);
+  const [toast, setToast] = React.useState<Toast | null>(null);
+  const timer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const push = React.useCallback((text: string, tone: Toast["tone"] = "success") => {
-    const id = Date.now() + Math.random();
-    setItems((list) => [...list.slice(-2), { id, tone, text }]);
-    window.setTimeout(() => setItems((list) => list.filter((t) => t.id !== id)), 3500);
+    setToast({ id: Date.now(), tone, text });
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => setToast(null), tone === "danger" ? 7000 : 3500);
   }, []);
+  React.useEffect(
+    () => () => {
+      if (timer.current) clearTimeout(timer.current);
+    },
+    [],
+  );
   return (
     <Ctx.Provider value={push}>
       {children}
-      <div aria-live="polite" className="pointer-events-none fixed inset-x-0 top-3 z-[60] flex flex-col items-center gap-2 px-4 md:items-end md:pr-6">
-        {items.map((t) => (
+      <div aria-live="polite" role="status" className="pointer-events-none fixed inset-x-0 bottom-[calc(var(--tabbar-h)+12px)] z-[60] flex justify-center px-4 md:bottom-4">
+        {toast ? (
           <div
-            key={t.id}
-            role={t.tone === "danger" ? "alert" : "status"}
+            key={toast.id}
             className={cn(
-              "am-pop pointer-events-auto flex max-w-sm items-center gap-2.5 rounded-xl border bg-surface px-4 py-3 text-[15px] font-medium shadow-lg",
-              t.tone === "danger" ? "border-destructive/30" : "border-success/25",
+              "card-in pointer-events-auto max-w-xl rounded-xl px-4 py-3 text-sm font-semibold shadow-xl break-anywhere",
+              toast.tone === "danger" ? "bg-danger text-white" : "bg-foreground text-background",
             )}
           >
-            {t.tone === "danger" ? <XCircle className="size-5 shrink-0 text-destructive" /> : <CheckCircle2 className="size-5 shrink-0 text-success" />}
-            {t.text}
+            {toast.text}
           </div>
-        ))}
+        ) : null}
       </div>
     </Ctx.Provider>
   );

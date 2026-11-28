@@ -1,11 +1,12 @@
 "use client";
 
-import { Check, Copy } from "lucide-react";
+import { BarChart3, Bell, Check, Copy, ListTodo, MessageCircle } from "lucide-react";
 import * as React from "react";
 import { ApiError } from "@/lib/api";
 import { errorText, fieldText, t } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { Button } from "./ui/button";
+import { Card } from "./ui/card";
 
 /**
  * Отправка формы: блокирует повторное нажатие, хранит ошибку и ошибки полей.
@@ -44,7 +45,14 @@ export function useSubmit<T>(action: () => Promise<T>) {
   return { run, pending, error, fieldErrors, setError };
 }
 
-/** Страницы без входа: на ПК — описание продукта слева и форма справа; на телефоне — только форма. */
+const MODULES = [
+  { icon: ListTodo, label: "nav.tasks" },
+  { icon: MessageCircle, label: "nav.assistant" },
+  { icon: BarChart3, label: "nav.stats" },
+  { icon: Bell, label: "nav.notifications" },
+] as const;
+
+/** Страницы без входа — как в шаблоне продаж: фирменная панель слева и форма в карточке справа. */
 export function AuthShell({ title, description, children }: { title: string; description?: React.ReactNode; children: React.ReactNode }) {
   const [brand, setBrand] = React.useState<{ name: string; logoUrl: string } | null>(null);
   React.useEffect(() => {
@@ -54,50 +62,55 @@ export function AuthShell({ title, description, children }: { title: string; des
       .catch(() => {});
   }, []);
   const name = brand?.name ?? "";
+  const letter = (name.trim()[0] ?? "A").toUpperCase();
   return (
-    <main className="grid min-h-dvh lg:grid-cols-[1.05fr_1fr]">
-      <section className="relative hidden overflow-hidden bg-gradient-to-br from-primary via-primary to-[#1b2f86] p-12 text-white lg:flex lg:flex-col lg:justify-between">
-        <div aria-hidden className="absolute -right-24 -top-24 size-96 rounded-full bg-white/10 blur-2xl" />
-        <div aria-hidden className="absolute -bottom-32 -left-16 size-96 rounded-full bg-white/5" />
+    <main className="grid min-h-screen lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
+      <aside className="relative hidden overflow-hidden bg-primary text-primary-foreground lg:flex lg:flex-col lg:justify-between lg:p-12">
+        <div aria-hidden className="absolute inset-0 bg-[radial-gradient(80%_60%_at_0%_0%,#ffffff2e,transparent_60%),radial-gradient(70%_60%_at_100%_100%,#00000033,transparent_60%)]" />
+        <div aria-hidden className="absolute -bottom-24 -right-24 size-96 rounded-full border border-white/15" />
+        <div aria-hidden className="absolute -bottom-8 -right-8 size-64 rounded-full border border-white/10" />
         <div className="relative flex items-center gap-3">
           {brand?.logoUrl ? (
-            <img src={brand.logoUrl} alt="" className="size-11 rounded-xl bg-white object-contain p-1" />
+            <img src={brand.logoUrl} alt="" className="size-11 rounded-2xl bg-white object-contain p-1" />
           ) : (
-            <span className="flex size-11 items-center justify-center rounded-xl bg-white/15 text-lg font-bold">{name.charAt(0) || "A"}</span>
+            <span className="grid size-11 place-items-center rounded-2xl bg-white/15 text-lg font-bold backdrop-blur">{letter}</span>
           )}
           <span className="text-lg font-bold">{name}</span>
         </div>
-        <div className="relative max-w-md">
+        <div className="relative grid max-w-md gap-6">
           <h2 className="text-4xl font-bold leading-tight tracking-tight">{t("auth.heroTitle")}</h2>
-          <ul className="mt-8 flex flex-col gap-4 text-[15px] text-white/90">
-            {(["f1", "f2", "f3"] as const).map((k) => (
-              <li key={k} className="flex items-start gap-3">
-                <Check className="mt-0.5 size-5 shrink-0 rounded-full bg-white/20 p-0.5" />
-                {t(`auth.${k}`)}
+          <p className="text-lg text-white/80">{t("auth.heroText")}</p>
+          <ul className="flex flex-wrap gap-2">
+            {MODULES.map(({ icon: Icon, label }, index) => (
+              <li key={label} className="rise-in inline-flex items-center gap-2 rounded-full bg-white/12 px-3.5 py-2 text-sm font-semibold backdrop-blur" style={{ "--i": index + 1 } as React.CSSProperties}>
+                <Icon className="size-4" />
+                {t(label)}
               </li>
             ))}
           </ul>
         </div>
         <p className="relative text-sm text-white/60">{t("auth.footer")}</p>
-      </section>
-      <section className="flex items-center justify-center px-4 py-10">
-        <div className="am-fade-up w-full max-w-[400px]">
-          <div className="mb-6 flex items-center gap-3 lg:hidden">
-            <span className="flex size-10 items-center justify-center rounded-xl bg-primary text-base font-bold text-primary-foreground">{name.charAt(0) || "A"}</span>
+      </aside>
+      <div className="flex items-start justify-center px-4 py-10 sm:items-center">
+        <div className="page-in w-full max-w-md">
+          <div className="mb-6 flex items-center gap-2.5 lg:hidden">
+            <span className="grid size-10 place-items-center rounded-xl bg-primary text-base font-bold text-primary-foreground shadow-md shadow-primary/25">{letter}</span>
             <span className="font-bold">{name}</span>
           </div>
-          <h1 className="text-2xl font-bold tracking-tight">{title}</h1>
-          {description ? <p className="mt-2 text-[15px] leading-relaxed text-muted-foreground">{description}</p> : null}
-          <div className="mt-6">{children}</div>
+          <Card className="w-full p-7">
+            <h1 className="text-2xl font-bold tracking-tight">{title}</h1>
+            {description ? <div className="mt-2 text-sm leading-relaxed text-muted-foreground break-anywhere">{description}</div> : null}
+            <div className="mt-5">{children}</div>
+          </Card>
         </div>
-      </section>
+      </div>
     </main>
   );
 }
 
 export function TextLink({ href, children, className }: { href: string; children: React.ReactNode; className?: string }) {
   return (
-    <a href={href} className={cn("text-[15px] text-primary underline-offset-4 hover:underline", className)}>
+    <a href={href} className={cn("text-sm font-medium text-primary hover:underline", className)}>
       {children}
     </a>
   );
@@ -111,7 +124,7 @@ export function CopyField({ value }: { value: string }) {
         readOnly
         value={value}
         onFocus={(e) => e.currentTarget.select()}
-        className="h-10 min-w-0 flex-1 rounded-md border border-input bg-muted px-3 font-mono text-xs"
+        className="control-h min-w-0 flex-1 rounded-lg border border-input bg-muted px-3 font-mono text-xs"
         aria-label={t("app.link")}
       />
       <Button
@@ -135,7 +148,7 @@ export function CopyField({ value }: { value: string }) {
 
 export function LoadError({ onRetry, message }: { onRetry: () => void; message?: string }) {
   return (
-    <div role="alert" className="flex flex-col items-start gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
+    <div role="alert" className="flex flex-col items-start gap-3 rounded-2xl bg-[#fde7e6] p-4 text-sm text-danger">
       <p>{message ?? errorText("network")}</p>
       <Button variant="outline" size="sm" onClick={onRetry}>
         {t("app.retry")}

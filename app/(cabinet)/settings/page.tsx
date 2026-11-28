@@ -50,10 +50,10 @@ export default function SettingsPage() {
 
   return (
     <>
-      <PageHeader title={director ? t("settings.title") : t("nav.team")} subtitle={director ? t("settings.subtitle") : t("team.subtitle")} />
+      <PageHeader title={director ? t("settings.title") : t("nav.team")} />
       <PageBody className="flex max-w-5xl flex-col gap-5">
         {tabs.length > 1 ? (
-          <div role="tablist" aria-label={t("settings.title")} className="grid grid-cols-4 gap-1 rounded-2xl bg-muted/80 p-1">
+          <div role="tablist" aria-label={t("settings.title")} className="flex gap-1 overflow-x-auto border-b border-border">
             {tabs.map(({ key, icon: Icon }) => (
               <button
                 key={key}
@@ -62,17 +62,17 @@ export default function SettingsPage() {
                 aria-selected={tab === key}
                 onClick={() => select(key)}
                 className={cn(
-                  "flex min-w-0 flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 text-xs font-semibold transition-all sm:flex-row sm:gap-2 sm:px-4 sm:py-2.5 sm:text-[15px]",
-                  tab === key ? "bg-surface text-foreground shadow-sm" : "text-foreground/60 hover:text-foreground",
+                  "-mb-px flex shrink-0 cursor-pointer items-center gap-2 whitespace-nowrap border-b-2 px-4 py-3 text-[15px] font-semibold transition-colors",
+                  tab === key ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground",
                 )}
               >
-                <Icon className="size-[18px]" />
-                <span className="max-w-full truncate">{t(`settings.tabs.${key}`)}</span>
+                <Icon aria-hidden className={cn("size-[18px]", tab === key ? "text-primary" : "")} strokeWidth={1.9} />
+                {t(`settings.tabs.${key}`)}
               </button>
             ))}
           </div>
         ) : null}
-        <div role="tabpanel" key={tab} className="am-fade-up">
+        <div role="tabpanel" key={tab} className="page-in">
           {tab === "company" ? <CompanyTab /> : tab === "branches" ? <BranchesTab /> : tab === "assistant" ? <AssistantTab /> : <TeamTab />}
         </div>
       </PageBody>

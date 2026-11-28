@@ -170,7 +170,7 @@ export function StatusDialog({
                 <Textarea value={result} onChange={(e) => setResult(e.target.value)} rows={4} required={transition.requires.resultText} autoFocus />
               </Field>
               <div className="flex flex-col gap-2">
-                {needsFile ? <p className="text-sm text-destructive">{t("tasks.statusForm.attachmentRequired")}</p> : null}
+                {needsFile ? <p className="text-sm text-danger">{t("tasks.statusForm.attachmentRequired")}</p> : null}
                 {card.attachments.length ? (
                   <ul className="flex flex-col gap-1 text-sm text-muted-foreground">
                     {card.attachments.map((a) => (

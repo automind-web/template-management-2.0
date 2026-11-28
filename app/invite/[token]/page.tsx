@@ -69,7 +69,7 @@ export default function InvitePage() {
   return (
     <AuthShell title={t("invite.title")} description={subtitle}>
       {info.kind === "member" ? (
-        <div role="tablist" aria-label={t("invite.title")} className="mb-4 grid grid-cols-2 overflow-hidden rounded-md border border-border text-[15px] font-semibold">
+        <div role="tablist" aria-label={t("invite.title")} className="mb-5 grid grid-cols-2 border-b border-border text-[15px] font-semibold">
           {(["new", "existing"] as const).map((m) => (
             <button
               key={m}
@@ -77,7 +77,7 @@ export default function InvitePage() {
               role="tab"
               aria-selected={mode === m}
               onClick={() => setMode(m)}
-              className={cn("px-3 py-2.5", mode === m ? "bg-selected text-foreground" : "text-foreground/70 hover:bg-muted")}
+              className={cn("-mb-px cursor-pointer border-b-2 px-3 py-3 transition-colors", mode === m ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")}
             >
               {t(`invite.mode.${m}`)}
             </button>

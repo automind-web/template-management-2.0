@@ -154,13 +154,13 @@ function CompanyForm({ data }: { data: Company }) {
                   aria-label={c}
                   aria-pressed={form.accent.toLowerCase() === c}
                   onClick={() => set({ accent: c })}
-                  className="am-lift flex size-9 items-center justify-center rounded-full ring-offset-2 aria-pressed:ring-2 aria-pressed:ring-foreground/30"
+                  className="lift flex size-9 items-center justify-center rounded-full ring-offset-2 aria-pressed:ring-2 aria-pressed:ring-foreground/30"
                   style={{ background: c }}
                 >
                   {form.accent.toLowerCase() === c ? <Check className="size-4 text-white" /> : null}
                 </button>
               ))}
-              <label className="am-lift relative flex size-9 cursor-pointer items-center justify-center overflow-hidden rounded-full border-2 border-dashed border-border" title={t("settings.company.colorCustom")}>
+              <label className="lift relative flex size-9 cursor-pointer items-center justify-center overflow-hidden rounded-full border-2 border-dashed border-border" title={t("settings.company.colorCustom")}>
                 <span className="text-lg leading-none text-foreground/50">+</span>
                 <input type="color" value={form.accent} onChange={(e) => set({ accent: e.target.value })} className="absolute inset-0 cursor-pointer opacity-0" aria-label={t("settings.company.colorCustom")} />
               </label>

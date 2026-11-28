@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, ChevronRight, Copy, KeyRound, Link2, MessageCircle, Search, Send, UserPlus, X } from "lucide-react";
+import { Check, ChevronRight, Copy, Crown, KeyRound, Link2, MessageCircle, Search, Send, UserPlus, Users, X } from "lucide-react";
 import * as React from "react";
 import { useCabinet } from "@/components/cabinet/cabinet-context";
 import { EmptyState } from "@/components/cabinet/page-header";
@@ -11,6 +11,7 @@ import { Alert, Card, Spinner } from "@/components/ui/card";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Field } from "@/components/ui/field";
 import { Input, NativeSelect } from "@/components/ui/input";
+import { StatTile } from "@/components/ui/stat-tile";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/components/ui/toast";
 import { api, ApiError } from "@/lib/api";
@@ -74,22 +75,14 @@ export function TeamTab() {
   const active = list.filter((m) => m.active);
   const inactive = list.filter((m) => !m.active);
   const pending = invites.data?.invites.filter((i) => i.state === "active" && i.kind === "member") ?? [];
-  const stats = [
-    { label: t("team.statPeople"), value: all.filter((m) => m.active).length },
-    { label: t("team.statManagers"), value: all.filter((m) => m.active && m.role === "manager").length },
-    { label: t("team.statWhatsapp"), value: all.filter((m) => m.active && m.phoneLinked).length },
-    { label: t("team.statInvites"), value: pending.length },
-  ];
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        {stats.map((s, i) => (
-          <Card key={s.label} className="am-fade-up p-4" style={{ animationDelay: `${i * 40}ms` }}>
-            <p className="text-2xl font-bold tabular-nums">{s.value}</p>
-            <p className="text-sm text-muted-foreground">{s.label}</p>
-          </Card>
-        ))}
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <StatTile index={0} icon={Users} label={t("team.statPeople")} value={all.filter((m) => m.active).length} />
+        <StatTile index={1} icon={Crown} tone="warning" label={t("team.statManagers")} value={all.filter((m) => m.active && m.role === "manager").length} />
+        <StatTile index={2} icon={MessageCircle} tone="success" label={t("team.statWhatsapp")} value={all.filter((m) => m.active && m.phoneLinked).length} />
+        <StatTile index={3} icon={Link2} label={t("team.statInvites")} value={pending.length} />
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -359,7 +352,7 @@ function ShareLink({ url, name, company, reset }: { url: string; name: string; c
   const text = reset ? t("team.shareResetText", { url }) : t("team.shareText", { name: name.trim() || "", company, url }).replace(/^,\s*/, "");
   return (
     <div className="flex flex-col gap-3">
-      <div className="am-pop flex items-center gap-3 rounded-xl bg-success/10 p-3 text-success">
+      <div className="card-in flex items-center gap-3 rounded-xl bg-success/10 p-3 text-success">
         <Check className="size-5 shrink-0" />
         <span className="text-[15px] font-semibold">{reset ? t("team.resetReady") : t("team.linkCreated")}</span>
       </div>
@@ -538,7 +531,7 @@ function MemberDialog({ member, director, onClose, onSaved }: { member: Member |
                   type="button"
                   disabled={busy}
                   onClick={() => void toggleAccess()}
-                  className={cn("flex items-center gap-3 rounded-xl px-3 py-2.5 text-left", member.active ? "text-destructive hover:bg-destructive/5" : "hover:bg-muted")}
+                  className={cn("flex items-center gap-3 rounded-xl px-3 py-2.5 text-left", member.active ? "text-danger hover:bg-danger/5" : "hover:bg-muted")}
                 >
                   {busy ? <Spinner /> : member.active ? <X className="size-5" /> : <Check className="size-5 text-success" />}
                   <span>

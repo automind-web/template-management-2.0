@@ -1,5 +1,6 @@
 "use client";
 
+import { AlertTriangle, CheckCircle2, Clock3, Eye, Gauge, Rocket, Timer, XCircle, type LucideIcon } from "lucide-react";
 import Link from "next/link";
 import * as React from "react";
 import { ALL, useCabinet } from "@/components/cabinet/cabinet-context";
@@ -143,8 +144,8 @@ export default function StatsPage() {
                 aria-pressed={query.preset === p}
                 onClick={() => set({ preset: p, ...presetRange(p, tz) })}
                 className={cn(
-                  "h-9 rounded-full border px-3.5 text-sm font-semibold",
-                  query.preset === p ? "border-primary/30 bg-selected" : "border-border bg-surface text-foreground/80 hover:bg-muted",
+                  "inline-flex h-8 cursor-pointer items-center whitespace-nowrap rounded-full border px-3 text-[13px] font-semibold transition-colors",
+                  query.preset === p ? "border-transparent bg-selected text-selected-foreground" : "border-border bg-surface text-foreground/80 hover:bg-muted",
                 )}
               >
                 {t(`stats.presets.${p}`)}
@@ -199,35 +200,40 @@ export default function StatsPage() {
               </span>
             </p>
 
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-              <Tile label={t("stats.tiles.open")} value={s.open.n} note={t("stats.notes.open", { n: s.open.new, p: s.open.progress })} onClick={() => open(t("stats.tiles.open"), s.open.ids)} />
-              <Tile label={t("stats.tiles.review")} value={s.review.n} note={t("stats.notes.review")} onClick={() => open(t("stats.tiles.review"), s.review.ids)} />
-              <Tile label={t("stats.tiles.overdue")} value={s.overdue.n} danger={s.overdue.n > 0} note={t("stats.notes.overdue")} onClick={() => open(t("stats.tiles.overdue"), s.overdue.ids)} />
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+              <Tile index={0} icon={Clock3} label={t("stats.tiles.open")} value={s.open.n} note={t("stats.notes.open", { n: s.open.new, p: s.open.progress })} onClick={() => open(t("stats.tiles.open"), s.open.ids)} />
+              <Tile index={1} icon={Eye} tone="warning" label={t("stats.tiles.review")} value={s.review.n} note={t("stats.notes.review")} onClick={() => open(t("stats.tiles.review"), s.review.ids)} />
+              <Tile index={2} icon={AlertTriangle} tone="danger" label={t("stats.tiles.overdue")} value={s.overdue.n} danger={s.overdue.n > 0} note={t("stats.notes.overdue")} onClick={() => open(t("stats.tiles.overdue"), s.overdue.ids)} />
               <Tile
+                index={3} icon={CheckCircle2} tone="success"
                 label={t("stats.tiles.done")}
                 value={pct(s.done.n, s.done.denom)}
                 note={s.done.denom ? t("stats.notes.done", { n: s.done.n, d: s.done.denom }) : t("stats.notes.emptyDenom")}
                 onClick={() => open(t("stats.tiles.done"), s.done.ids)}
               />
               <Tile
+                index={4} icon={XCircle} tone="danger"
                 label={t("stats.tiles.notDone")}
                 value={pct(s.notDone.n, s.notDone.denom)}
                 note={s.notDone.denom ? t("stats.notes.ratio", { n: s.notDone.n, d: s.notDone.denom }) : t("stats.notes.emptyDenom")}
                 onClick={() => open(t("stats.tiles.notDone"), s.notDone.ids)}
               />
               <Tile
+                index={5} icon={Timer}
                 label={t("stats.tiles.onTime")}
                 value={`${s.onTime.n} / ${s.late.n}`}
                 note={s.onTime.n + s.late.n ? t("stats.notes.onTime", { p: pct(s.onTime.n, s.onTime.n + s.late.n) }) : t("stats.notes.noCompleted")}
                 onClick={() => open(t("stats.tiles.onTime"), [...s.onTime.ids, ...s.late.ids])}
               />
               <Tile
+                index={6} icon={Gauge}
                 label={t("stats.tiles.speed")}
                 value={s.speed.medianMs === null ? "—" : formatDuration(s.speed.medianMs)}
                 note={`${t(`stats.notes.speed.${data.speedFrom}`)} · ${t("stats.notes.tasksN", { n: s.speed.n })}`}
                 onClick={() => open(t("stats.tiles.speed"), s.speed.ids)}
               />
               <Tile
+                index={7} icon={Rocket} tone="success"
                 label={t("stats.tiles.early")}
                 value={s.early.n}
                 note={s.early.medianLeadMs === null ? t("stats.notes.none") : t("stats.notes.early", { d: formatDuration(s.early.medianLeadMs) })}
@@ -237,8 +243,8 @@ export default function StatsPage() {
 
             <h2 className="mt-2 text-xl font-bold">{t("stats.byEmployee")}</h2>
             <Card className="overflow-x-auto">
-              <table className="w-full min-w-[880px] border-collapse text-[15px]">
-                <thead className="bg-muted/60 text-sm font-semibold text-muted-foreground">
+              <table className="w-full min-w-[880px] border-collapse text-sm">
+                <thead className="bg-muted/70 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                   <tr>
                     <th className="px-4 py-3 text-left">{t("stats.cols.employee")}</th>
                     <th className="px-3 py-3 text-right">{t("stats.cols.overdue")} ↓</th>
@@ -322,14 +328,43 @@ export default function StatsPage() {
   );
 }
 
-function Tile({ label, value, note, danger, onClick }: { label: string; value: React.ReactNode; note: string; danger?: boolean; onClick: () => void }) {
+const TILE_TONES = { primary: "bg-primary/10 text-primary", success: "bg-success/12 text-success", danger: "bg-danger/10 text-danger", warning: "bg-warning/15 text-warning" };
+
+/** Плитка — как на главной шаблона продаж: подпись, значок, крупное значение, пояснение. Нажатие — список задач. */
+function Tile({
+  index,
+  icon: Icon,
+  tone = "primary",
+  label,
+  value,
+  note,
+  danger,
+  onClick,
+}: {
+  index: number;
+  icon: LucideIcon;
+  tone?: keyof typeof TILE_TONES;
+  label: string;
+  value: React.ReactNode;
+  note: string;
+  danger?: boolean;
+  onClick: () => void;
+}) {
   return (
-    <button type="button" onClick={onClick} className="text-left">
-      <Card className="flex h-full flex-col gap-1.5 p-4 transition-colors hover:border-primary/40">
-        <span className="text-[15px] font-semibold text-foreground/80">{label}</span>
-        <span className={cn("text-3xl font-bold", danger && "text-destructive")}>{value}</span>
-        <span className="text-sm text-muted-foreground">{note}</span>
-      </Card>
+    <button
+      type="button"
+      onClick={onClick}
+      className="rise-in lift block w-full cursor-pointer rounded-2xl border border-border bg-surface p-4 text-left shadow-[0_1px_2px_#1d24330a] sm:p-5"
+      style={{ "--i": index } as React.CSSProperties}
+    >
+      <span className="flex items-center justify-between gap-2">
+        <span className="text-sm font-semibold text-foreground/70">{label}</span>
+        <span className={cn("grid size-9 shrink-0 place-items-center rounded-xl", TILE_TONES[tone])}>
+          <Icon className="size-[18px]" />
+        </span>
+      </span>
+      <span className={cn("mt-2 block text-[30px] font-bold leading-tight tracking-tight tabular-nums", danger && "text-danger")}>{value}</span>
+      <span className="mt-1 block text-[13px] text-muted-foreground">{note}</span>
     </button>
   );
 }
