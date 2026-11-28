@@ -15,14 +15,17 @@ export function DialogContent({
   title,
   description,
   footer,
+  side = false,
   ...props
-}: React.ComponentProps<typeof DialogPrimitive.Content> & { title: string; description?: string; footer?: React.ReactNode }) {
+}: React.ComponentProps<typeof DialogPrimitive.Content> & { title: string; description?: string; footer?: React.ReactNode; side?: boolean }) {
   return (
     <DialogPrimitive.Portal>
       <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-[#1d2433]/45" />
       <DialogPrimitive.Content
         className={cn(
-          "sheet-up fixed inset-x-0 bottom-0 z-50 flex max-h-[92dvh] flex-col rounded-t-2xl bg-surface shadow-2xl sm:inset-auto sm:left-1/2 sm:top-1/2 sm:w-[calc(100%-3rem)] sm:max-w-xl sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-2xl sm:[animation:none]",
+          side
+            ? "task-sheet fixed inset-y-0 right-0 z-50 flex h-dvh w-full max-w-2xl flex-col bg-surface shadow-2xl"
+            : "sheet-up fixed inset-x-0 bottom-0 z-50 flex max-h-[92dvh] flex-col rounded-t-2xl bg-surface shadow-2xl sm:inset-auto sm:left-1/2 sm:top-1/2 sm:w-[calc(100%-3rem)] sm:max-w-xl sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-2xl sm:[animation:none]",
           className,
         )}
         {...props}

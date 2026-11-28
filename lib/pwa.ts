@@ -2,14 +2,36 @@
 
 import { api } from "./api";
 
-/** Регистрация service worker (push и установка приложения). */
+let registration: Promise<ServiceWorkerRegistration | null> | null = null;
+/** One registration shared by the app and notification controls. */
 export async function registerServiceWorker(): Promise<ServiceWorkerRegistration | null> {
   if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return null;
-  try {
-    return await navigator.serviceWorker.register("/sw.js", { scope: "/" });
-  } catch {
-    return null;
-  }
+  if (!registration) registration = navigator.serviceWorker.register("/sw.js", { scope: "/", updateViaCache: "none" })
+    .catch(() => { registration = null; return null; });
+  return registration;
+}
+
+async function readyWorker(): Promise<ServiceWorkerRegistration> {
+  if (!(await registerServiceWorker())) throw new Error("service_worker_unavailable");
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error("service_worker_timeout")), 10_000);
+    navigator.serviceWorker.ready.then((reg) => { clearTimeout(timeout); resolve(reg); }, (error) => { clearTimeout(timeout); reject(error); });
+  });
+}
+
+export async function hasPushSubscription(): Promise<boolean> {
+  if (pushPermission() !== "granted") return false;
+  const reg = await navigator.serviceWorker.getRegistration();
+  const sub = await reg?.pushManager.getSubscription();
+  return Boolean(sub && (!sub.expirationTime || sub.expirationTime > Date.now()));
+}
+
+/** Renew the existing device binding after login, without asking permission again. */
+export async function syncPushSubscription(): Promise<void> {
+  if (pushPermission() !== "granted") return;
+  const reg = await readyWorker();
+  const sub = await reg.pushManager.getSubscription();
+  if (sub && (!sub.expirationTime || sub.expirationTime > Date.now())) await api("POST", "/api/push/subscribe", sub.toJSON());
 }
 
 /** Событие «Установить приложение» (Chrome, Edge, Android) сохраняется для кнопки. */
@@ -43,8 +65,9 @@ export function onInstallChange(listener: () => void): () => void {
 
 export async function promptInstall(): Promise<boolean> {
   if (!deferredInstall) return false;
-  await deferredInstall.prompt();
-  const choice = await deferredInstall.userChoice;
+  const event = deferredInstall;
+  await event.prompt();
+  const choice = await event.userChoice;
   deferredInstall = null;
   listeners.forEach((l) => l());
   return choice.outcome === "accepted";
@@ -68,8 +91,14 @@ export async function enablePush(vapidPublicKey: string): Promise<PushState> {
   if (pushPermission() === "unsupported") return "unsupported";
   const permission = await Notification.requestPermission();
   if (permission !== "granted") return permission as PushState;
-  const reg = (await registerServiceWorker()) ?? (await navigator.serviceWorker.ready);
-  const existing = await reg.pushManager.getSubscription();
+  const reg = await readyWorker();
+  let existing = await reg.pushManager.getSubscription();
+  const expected = urlBase64ToUint8Array(vapidPublicKey);
+  const actual = existing?.options.applicationServerKey ? new Uint8Array(existing.options.applicationServerKey) : null;
+  if (existing && ((existing.expirationTime && existing.expirationTime <= Date.now()) || !actual || actual.length !== expected.length || actual.some((byte, i) => byte !== expected[i]))) {
+    await existing.unsubscribe();
+    existing = null;
+  }
   const sub =
     existing ??
     (await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(vapidPublicKey) as BufferSource }));
@@ -82,8 +111,8 @@ export async function disablePush(): Promise<void> {
   const reg = await navigator.serviceWorker.getRegistration();
   const sub = await reg?.pushManager.getSubscription();
   if (!sub) return;
-  await api("POST", "/api/push/unsubscribe", { endpoint: sub.endpoint }).catch(() => {});
-  await sub.unsubscribe().catch(() => false);
+  await api("POST", "/api/push/unsubscribe", { endpoint: sub.endpoint });
+  await sub.unsubscribe();
 }
 
 /** Выход: подписка устройства снимается, сессия отзывается на сервере. */

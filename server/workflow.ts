@@ -24,16 +24,16 @@ export type Workflow = {
 
 export async function loadWorkflow(companyId: string): Promise<Workflow> {
   const db = getDb();
-  const statuses = (
-    await db
+  const [statusRows, transitionRows] = await Promise.all([
+    db
       .select()
       .from(schema.taskStatuses)
       .where(and(eq(schema.taskStatuses.companyId, companyId), isNull(schema.taskStatuses.archivedAt)))
-      .orderBy(asc(schema.taskStatuses.sort))
-  ).map((s) => ({ key: s.key, name: s.name, category: s.category, sort: s.sort }));
-  const transitions = (
-    await db.select().from(schema.statusTransitions).where(eq(schema.statusTransitions.companyId, companyId))
-  ).map((t) => ({
+      .orderBy(asc(schema.taskStatuses.sort)),
+    db.select().from(schema.statusTransitions).where(eq(schema.statusTransitions.companyId, companyId)),
+  ]);
+  const statuses = statusRows.map((s) => ({ key: s.key, name: s.name, category: s.category, sort: s.sort }));
+  const transitions = transitionRows.map((t) => ({
     from: t.fromKey,
     to: t.toKey,
     actors: JSON.parse(t.actorsJson) as TransitionActor[],

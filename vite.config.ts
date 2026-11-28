@@ -10,6 +10,7 @@ const { d1, r2 } = hostingConfig as { d1: string | null; r2: string | null };
 const localBindingConfig = {
   main: "./worker/index.ts",
   compatibility_flags: ["nodejs_compat"],
+  triggers: { crons: ["* * * * *"] },
   d1_databases: d1
     ? [{ binding: d1, database_name: "ai-management-d1", database_id: PLACEHOLDER_DATABASE_ID }]
     : [],

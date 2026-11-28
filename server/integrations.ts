@@ -55,9 +55,10 @@ async function companyId(): Promise<string | null> {
 }
 
 async function read(kind: Kind): Promise<Stored | null> {
-  const id = await companyId();
-  if (!id) return null;
-  const row = await getDb().query.integrations.findFirst({ where: and(eq(schema.integrations.companyId, id), eq(schema.integrations.kind, kind)) });
+  const rows = await getDb().select({ configJson: schema.integrations.configJson }).from(schema.integrations)
+    .innerJoin(schema.companies, eq(schema.companies.id, schema.integrations.companyId))
+    .where(eq(schema.integrations.kind, kind)).limit(1);
+  const row = rows[0];
   return row ? (JSON.parse(row.configJson) as Stored) : null;
 }
 
@@ -109,8 +110,16 @@ export async function pushKeys(): Promise<{ publicKey: string; privateKey: strin
   const pair = (await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"])) as CryptoKeyPair;
   const jwk = await crypto.subtle.exportKey("jwk", pair.privateKey);
   const publicKey = b64urlEncode(new Uint8Array((await crypto.subtle.exportKey("raw", pair.publicKey)) as ArrayBuffer));
-  await write("push", { secret: await encrypt(jwk.d!), publicKey }, null);
-  // Старые подписки устройств подписаны прежним ключом — они больше не действуют.
-  await getDb().update(schema.pushSubscriptions).set({ revokedAt: Date.now() });
-  return { publicKey, privateKey: jwk.d! };
+  const id = (await companyId())!;
+  const configJson = JSON.stringify({ secret: await encrypt(jwk.d!), publicKey });
+  if (!stored) {
+    await getDb().insert(schema.integrations).values({ companyId: id, kind: "push", enabled: true, configJson, updatedBy: null, updatedAt: Date.now() }).onConflictDoNothing();
+  } else {
+    // Only replace the exact broken key that was inspected (cross-isolate compare-and-swap).
+    await getDb().update(schema.integrations).set({ configJson, enabled: true, updatedAt: Date.now() })
+      .where(and(eq(schema.integrations.companyId, id), eq(schema.integrations.kind, "push"), eq(schema.integrations.configJson, JSON.stringify(stored))));
+  }
+  const winner = await read("push");
+  const privateKey = winner?.secret ? await decrypt(winner.secret) : null;
+  return winner?.publicKey && privateKey ? { publicKey: winner.publicKey, privateKey } : null;
 }

@@ -24,19 +24,27 @@ import type { Assignee, TaskCard, TaskListItem } from "./types";
 
 /** Кому участник может назначить задачу в филиале (или «all» — для фильтра директора). Список кэшируется. */
 const assigneeCache = new Map<string, Assignee[]>();
+const assigneeTime = new Map<string, number>();
+const assigneePending = new Map<string, Promise<{ assignees: Assignee[] }>>();
 export function useAssignees(branchId: string | null, enabled = true) {
   const [list, setList] = React.useState<Assignee[] | null>(() => (branchId ? (assigneeCache.get(branchId) ?? null) : null));
   React.useEffect(() => {
     if (!branchId || !enabled) return;
     setList(assigneeCache.get(branchId) ?? null);
-    const ctrl = new AbortController();
-    api<{ assignees: Assignee[] }>("GET", `/api/tasks/assignees?branch=${encodeURIComponent(branchId)}`, undefined, { signal: ctrl.signal })
-      .then((r) => {
-        assigneeCache.set(branchId, r.assignees);
-        setList(r.assignees);
-      })
-      .catch(() => {});
-    return () => ctrl.abort();
+    if (Date.now() - (assigneeTime.get(branchId) ?? 0) < 30_000) return;
+    let alive = true;
+    let pending = assigneePending.get(branchId);
+    if (!pending) {
+      pending = api<{ assignees: Assignee[] }>("GET", `/api/tasks/assignees?branch=${encodeURIComponent(branchId)}`);
+      assigneePending.set(branchId, pending);
+      void pending.finally(() => assigneePending.delete(branchId)).catch(() => {});
+    }
+    pending.then((r) => {
+      assigneeCache.set(branchId, r.assignees);
+      assigneeTime.set(branchId, Date.now());
+      if (alive) setList(r.assignees);
+    }).catch(() => {});
+    return () => { alive = false; };
   }, [branchId, enabled]);
   return list;
 }

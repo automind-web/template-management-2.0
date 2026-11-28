@@ -32,10 +32,20 @@ function useUnread(pathname: string) {
         .then((r) => alive && setUnread(r.unread))
         .catch(() => {});
     void load();
-    const timer = window.setInterval(load, 60_000);
+    const refresh = () => { if (document.visibilityState === "visible") void load(); };
+    const message = (event: MessageEvent) => { if (event.data?.type === "notification") refresh(); };
+    window.addEventListener("focus", refresh);
+    window.addEventListener("am:notifications", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    navigator.serviceWorker?.addEventListener("message", message);
+    const timer = window.setInterval(refresh, 30_000);
     return () => {
       alive = false;
       window.clearInterval(timer);
+      window.removeEventListener("focus", refresh);
+      window.removeEventListener("am:notifications", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+      navigator.serviceWorker?.removeEventListener("message", message);
     };
   }, [pathname]);
   return unread;

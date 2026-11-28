@@ -2,7 +2,8 @@
 
 import * as React from "react";
 import { api } from "@/lib/api";
-import { registerServiceWorker } from "@/lib/pwa";
+import { registerServiceWorker, syncPushSubscription } from "@/lib/pwa";
+import { TaskPanelProvider } from "@/components/tasks/task-panel";
 import { ToastProvider } from "@/components/ui/toast";
 
 export type Me = {
@@ -75,7 +76,7 @@ export function CabinetProvider({ initialMe, children }: { initialMe: Me; childr
   const [branchEpoch, setEpoch] = React.useState(0);
 
   React.useEffect(() => {
-    void registerServiceWorker();
+    void registerServiceWorker().then(() => syncPushSubscription()).catch(() => {});
   }, []);
 
   // Выбор филиала восстанавливается после загрузки (localStorage доступен только в браузере).
@@ -113,7 +114,7 @@ export function CabinetProvider({ initialMe, children }: { initialMe: Me; childr
   );
   return (
     <Ctx.Provider value={value}>
-      <ToastProvider>{children}</ToastProvider>
+      <ToastProvider><TaskPanelProvider>{children}</TaskPanelProvider></ToastProvider>
     </Ctx.Provider>
   );
 }

@@ -1,3 +1,4 @@
+import { cache } from "react";
 /**
  * Настройки компании: значения по умолчанию из config/company.ts,
  * переопределения — в таблице settings (scope = company). Меняются в «Настройках системы».
@@ -72,7 +73,7 @@ export async function saveSettings(companyId: string, patch: Partial<CompanySett
 }
 
 /** Оформление для страниц без входа (вход, приглашение): установка рассчитана на одну компанию. */
-export async function loadPublicBranding(): Promise<{ name: string; accent: string; logoUrl: string; fontFamily: string }> {
+export const loadPublicBranding = cache(async (): Promise<{ name: string; accent: string; logoUrl: string; fontFamily: string }> => {
   try {
     const company = await getDb().query.companies.findFirst();
     if (!company) return { name: companyConfig.name, accent: DEFAULT_SETTINGS.accent, logoUrl: DEFAULT_SETTINGS.logoUrl, fontFamily: "" };
@@ -81,4 +82,4 @@ export async function loadPublicBranding(): Promise<{ name: string; accent: stri
   } catch {
     return { name: companyConfig.name, accent: DEFAULT_SETTINGS.accent, logoUrl: "", fontFamily: "" };
   }
-}
+});

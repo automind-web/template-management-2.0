@@ -5,7 +5,7 @@
  */
 import { DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES, handleImageOptimization } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
-import { maybeProcessQueue, processQueue, rememberOrigin } from "../server/notify/queue";
+import { maybeProcessQueue, processQueue, rememberOrigin, recordScheduledRun } from "../server/notify/queue";
 
 interface WorkerEnv {
   ASSETS: { fetch(request: Request): Promise<Response> };
@@ -72,14 +72,14 @@ const worker = {
     const response = await handler.fetch(request, env as never, ctx as never);
     // Очередь уведомлений — короткой порцией после ответа (не чаще раза в 15 с).
     if (url.pathname.startsWith("/api/") || request.headers.get("accept")?.includes("text/html")) {
-      ctx.waitUntil(rememberOrigin(url.origin).then(maybeProcessQueue).catch(() => {}));
+      ctx.waitUntil(rememberOrigin(url.origin).then(() => maybeProcessQueue(request.method !== "GET" && request.method !== "HEAD")).catch(() => {}));
     }
     return withSecurityHeaders(response);
   },
 
   /** Запуск по расписанию, если Sites его поддерживает: доставка напоминаний без входящих запросов. */
   async scheduled(_event: unknown, _env: unknown, ctx: ExecutionContext): Promise<void> {
-    ctx.waitUntil(processQueue({ limit: 200 }).then(() => undefined));
+    ctx.waitUntil(processQueue({ limit: 200 }).then(recordScheduledRun));
   },
 };
 

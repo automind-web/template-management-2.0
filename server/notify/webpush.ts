@@ -91,6 +91,7 @@ export async function sendWebPush(
   const body = await encryptPayload(enc.encode(JSON.stringify(message)), subscription.p256dh, subscription.auth);
   const res = await fetch(subscription.endpoint, {
     method: "POST",
+    signal: AbortSignal.timeout(10_000),
     headers: {
       authorization: await vapidAuthorization(subscription.endpoint, vapid.publicKey, vapid.privateKey, vapid.subject),
       "content-encoding": "aes128gcm",

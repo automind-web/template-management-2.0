@@ -24,15 +24,17 @@ export default function SettingsPage() {
   const { me } = useCabinet();
   const director = me.capabilities.viewSystemSettings;
   const tabs = director ? TABS : TABS.filter((tab) => tab.key === "team");
+  const [visited, setVisited] = React.useState<Set<string>>(() => new Set([tabs[0]!.key]));
   const [tab, setTab] = React.useState<string>(tabs[0]!.key);
 
   React.useEffect(() => {
     const fromUrl = new URLSearchParams(window.location.search).get("tab");
-    if (fromUrl && tabs.some((x) => x.key === fromUrl)) setTab(fromUrl);
+    if (fromUrl && tabs.some((x) => x.key === fromUrl)) { setTab(fromUrl); setVisited((v) => new Set([...v, fromUrl])); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const select = (value: string) => {
+    setVisited((v) => new Set([...v, value]));
     setTab(value);
     window.history.replaceState(window.history.state, "", `${window.location.pathname}?tab=${value}`);
   };
@@ -72,9 +74,11 @@ export default function SettingsPage() {
             ))}
           </div>
         ) : null}
-        <div role="tabpanel" key={tab} className="page-in">
-          {tab === "company" ? <CompanyTab /> : tab === "branches" ? <BranchesTab /> : tab === "assistant" ? <AssistantTab /> : <TeamTab />}
-        </div>
+        {tabs.filter((item) => visited.has(item.key)).map(({ key }) => (
+          <div role="tabpanel" key={key} hidden={tab !== key} className="page-in">
+            {key === "company" ? <CompanyTab /> : key === "branches" ? <BranchesTab /> : key === "assistant" ? <AssistantTab /> : <TeamTab />}
+          </div>
+        ))}
       </PageBody>
     </>
   );

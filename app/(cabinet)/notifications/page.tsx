@@ -2,7 +2,9 @@
 
 import { Bell } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useOpenTask } from "@/components/tasks/task-panel";
+import { InstallApp } from "@/components/cabinet/install-app";
+import { useToast } from "@/components/ui/toast";
 import * as React from "react";
 import { useCabinet } from "@/components/cabinet/cabinet-context";
 import { EmptyState, PageBody, PageHeader } from "@/components/cabinet/page-header";
@@ -13,7 +15,7 @@ import { Checkbox, Input, NativeSelect } from "@/components/ui/input";
 import { api, ApiError } from "@/lib/api";
 import { formatShortDateTime } from "@/lib/format";
 import { errorText, t } from "@/lib/i18n";
-import { canInstall, disablePush, enablePush, isStandalone, onInstallChange, promptInstall, pushPermission, type PushState } from "@/lib/pwa";
+import { disablePush, enablePush, hasPushSubscription, pushPermission, type PushState } from "@/lib/pwa";
 import { cn } from "@/lib/utils";
 
 const EVENTS = ["assigned", "dueSoon", "overdue", "submitted", "returned", "accepted", "comment"] as const;
@@ -31,6 +33,7 @@ type Data = {
   items: { id: string; title: string; body: string; url: string | null; at: number; read: boolean }[];
   unread: number;
   scheduled: number;
+  delivery: { lastRunAt: number | null; scheduled: boolean; failed: number };
   prefs: Prefs;
   channels: { whatsapp: { linked: boolean; configured: boolean }; push: { configured: boolean; vapidPublicKey: string | null } };
 };
@@ -44,12 +47,22 @@ export default function NotificationsPage() {
       .then(setData)
       .catch((e) => setError(errorText(e instanceof ApiError ? e.code : "network")));
   }, []);
-  React.useEffect(load, [load]);
+  React.useEffect(() => {
+    load();
+    const timer = window.setInterval(() => { if (document.visibilityState === "visible") load(); }, 30_000);
+    const sync = () => load();
+    const pushed = (event: MessageEvent) => { if (event.data?.type === "notification") load(); };
+    navigator.serviceWorker?.addEventListener("message", pushed);
+    window.addEventListener("focus", sync);
+    window.addEventListener("am:notifications", sync);
+    return () => { navigator.serviceWorker?.removeEventListener("message", pushed); clearInterval(timer); window.removeEventListener("focus", sync); window.removeEventListener("am:notifications", sync); };
+  }, [load]);
 
   return (
     <>
       <PageHeader title={t("nav.notifications")} />
       <PageBody className="flex max-w-4xl flex-col gap-4">
+        <InstallApp />
         {error ? <LoadError message={error} onRetry={load} /> : null}
         {!data && !error ? (
           <p className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
@@ -69,11 +82,12 @@ export default function NotificationsPage() {
 
 function Inbox({ data, onChanged }: { data: Data; onChanged: () => void }) {
   const { me } = useCabinet();
-  const router = useRouter();
+  const openTask = useOpenTask();
   const open = async (item: Data["items"][number]) => {
-    if (!item.read) await api("POST", "/api/notifications/read", { ids: [item.id] }).catch(() => {});
+    if (!item.read) void api("POST", "/api/notifications/read", { ids: [item.id] }).then(onChanged).catch(() => {});
     // Права проверяются заново при открытии карточки.
-    if (item.url) router.push(item.url);
+    const taskId = item.url && /^\/tasks\/([^/]+)$/.exec(item.url)?.[1];
+    if (taskId) openTask(taskId);
     else onChanged();
   };
   return (
@@ -114,6 +128,8 @@ function Inbox({ data, onChanged }: { data: Data; onChanged: () => void }) {
         </ul>
       )}
       <p className="mt-3 text-sm text-muted-foreground">{t("notifications.scheduled", { n: data.scheduled })}</p>
+      <p className="mt-2 text-sm text-muted-foreground">{data.delivery.scheduled ? "Фоновая доставка по расписанию работает." : "Запуск напоминаний по расписанию пока не подтверждён."}</p>
+      {data.delivery.failed ? <p className="mt-1 text-sm text-danger">Не доставлено: {data.delivery.failed}. Проверьте подключение каналов.</p> : null}
     </Section>
   );
 }
@@ -123,42 +139,76 @@ function PrefsForm({ data, onSaved }: { data: Data; onSaved: () => void }) {
   const [saving, setSaving] = React.useState(false);
   const [message, setMessage] = React.useState<{ tone: "success" | "danger"; text: string } | null>(null);
   const [push, setPush] = React.useState<PushState>("default");
-  const [installable, setInstallable] = React.useState(false);
-  const [standalone, setStandalone] = React.useState(false);
+  const [subscribed, setSubscribed] = React.useState(false);
+  const [pushBusy, setPushBusy] = React.useState(false);
+  const toast = useToast();
+  const currentPrefs = React.useRef(data.prefs);
+  const confirmedPrefs = React.useRef(data.prefs);
+  const saves = React.useRef(Promise.resolve());
+  const revision = React.useRef(0);
 
   React.useEffect(() => {
     setPush(pushPermission());
-    setInstallable(canInstall());
-    setStandalone(isStandalone());
-    return onInstallChange(() => setInstallable(canInstall()));
+    void hasPushSubscription().then(setSubscribed).catch(() => setSubscribed(false));
   }, []);
 
   /** Каждое изменение сохраняется сразу; очередь напоминаний пересчитывается на сервере. */
-  const save = async (next: Prefs) => {
+  const save = (next: Prefs) => {
+    currentPrefs.current = next;
+    const at = ++revision.current;
     setPrefs(next);
     setSaving(true);
     setMessage(null);
-    try {
-      await api("PATCH", "/api/notifications/prefs", next);
-      setMessage({ tone: "success", text: t("profile.saved") });
-      onSaved();
-    } catch (e) {
-      setMessage({ tone: "danger", text: errorText(e instanceof ApiError ? e.code : "network") });
-    } finally {
-      setSaving(false);
-    }
+    const pending = saves.current.catch(() => {}).then(async () => {
+      try {
+        await api("PATCH", "/api/notifications/prefs", next);
+        confirmedPrefs.current = next;
+        if (at === revision.current) setMessage({ tone: "success", text: t("profile.saved") });
+      } catch (e) {
+        if (at === revision.current) {
+          currentPrefs.current = confirmedPrefs.current;
+          setPrefs(confirmedPrefs.current);
+          const text = errorText(e instanceof ApiError ? e.code : "network");
+          setMessage({ tone: "danger", text });
+          toast(text, "danger");
+        }
+      } finally { if (at === revision.current) setSaving(false); }
+    });
+    saves.current = pending;
+    return pending;
   };
 
   const togglePush = async (on: boolean) => {
-    if (on) {
-      if (!data.channels.push.vapidPublicKey) return;
-      const state = await enablePush(data.channels.push.vapidPublicKey).catch(() => pushPermission());
-      setPush(state);
-      if (state !== "granted") return;
-    } else {
-      await disablePush();
-    }
-    await save({ ...prefs, channels: { ...prefs.channels, push: on } });
+    setPushBusy(true);
+    try {
+      if (on) {
+        if (!data.channels.push.vapidPublicKey) throw new Error("push_unavailable");
+        const state = await enablePush(data.channels.push.vapidPublicKey);
+        setPush(state);
+        if (state !== "granted") { toast("Разрешите уведомления в настройках устройства.", "danger"); return; }
+        setSubscribed(true);
+      } else {
+        await disablePush();
+        setSubscribed(false);
+      }
+      await save({ ...currentPrefs.current, channels: { ...currentPrefs.current.channels, push: on } });
+    } catch (e) {
+      setPush(pushPermission());
+      setSubscribed(await hasPushSubscription().catch(() => false));
+      toast(e instanceof ApiError ? errorText(e.code) : "Не удалось подключить уведомления. Повторите попытку.", "danger");
+    } finally { setPushBusy(false); }
+  };
+
+  const testPush = async () => {
+    setPushBusy(true);
+    try {
+      const reg = await navigator.serviceWorker.getRegistration();
+      const sub = await reg?.pushManager.getSubscription();
+      if (!sub) throw new Error("no_subscription");
+      await api("POST", "/api/push/test", { endpoint: sub.endpoint });
+      toast("Тест отправлен. Проверьте уведомление на устройстве.");
+    } catch (e) { toast(e instanceof ApiError ? errorText(e.code) : "Не удалось отправить тестовое уведомление.", "danger"); }
+    finally { setPushBusy(false); }
   };
 
   const pushReady = data.channels.push.configured && push !== "unsupported" && push !== "denied";
@@ -192,8 +242,8 @@ function PrefsForm({ data, onSaved }: { data: Data; onSaved: () => void }) {
           />
           <ChannelRow
             label={t("notifications.push")}
-            checked={prefs.channels.push && push === "granted"}
-            disabled={!pushReady}
+            checked={prefs.channels.push && push === "granted" && subscribed}
+            disabled={!pushReady || pushBusy}
             state={
               !data.channels.push.configured ? (
                 <StateDot ok={false}>{t("notifications.pushServerOff")}</StateDot>
@@ -201,7 +251,7 @@ function PrefsForm({ data, onSaved }: { data: Data; onSaved: () => void }) {
                 <StateDot ok={false}>{t("notifications.pushDenied")}</StateDot>
               ) : push === "unsupported" ? (
                 <StateDot ok={false}>{t("notifications.pushUnsupported")}</StateDot>
-              ) : prefs.channels.push && push === "granted" ? (
+              ) : prefs.channels.push && push === "granted" && subscribed ? (
                 <StateDot ok>{t("notifications.works")}</StateDot>
               ) : (
                 <span className="text-sm text-muted-foreground">{t("notifications.pushOff")}</span>
@@ -219,17 +269,8 @@ function PrefsForm({ data, onSaved }: { data: Data; onSaved: () => void }) {
             </p>
           ) : null}
           {push === "denied" ? <p className="text-sm text-muted-foreground">{t("notifications.pushDeniedHint")}</p> : null}
-          <div className="flex flex-wrap items-center gap-3 border-t border-border pt-3">
-            {standalone ? (
-              <span className="text-sm text-muted-foreground">{t("notifications.installed")}</span>
-            ) : installable ? (
-              <Button variant="outline" onClick={() => void promptInstall()}>
-                {t("notifications.install")}
-              </Button>
-            ) : (
-              <span className="text-sm text-muted-foreground">{t("notifications.installHint")}</span>
-            )}
-          </div>
+          {subscribed && prefs.channels.push ? <Button variant="outline" disabled={pushBusy} onClick={() => void testPush()}>Проверить уведомление</Button> : null}
+
         </div>
       </Section>
 

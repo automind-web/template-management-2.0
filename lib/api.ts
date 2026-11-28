@@ -17,23 +17,31 @@ export class ApiError extends Error {
   }
 }
 
-type Options = { signal?: AbortSignal; redirectOn401?: boolean };
+type Options = { signal?: AbortSignal; redirectOn401?: boolean; timeoutMs?: number };
 
 /** Запрос к серверному слою. Сессия — в HttpOnly cookie, токены в JS не попадают. */
 export async function api<T = unknown>(method: string, path: string, body?: unknown, options: Options = {}): Promise<T> {
   let response: Response;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? 20_000);
+  const abort = () => controller.abort();
+  if (options.signal?.aborted) controller.abort();
+  options.signal?.addEventListener("abort", abort, { once: true });
   try {
     response = await fetch(path, {
       method,
       credentials: "same-origin",
       headers: body === undefined ? undefined : { "content-type": "application/json" },
       body: body === undefined ? undefined : JSON.stringify(body),
-      signal: options.signal,
+      signal: controller.signal,
       cache: "no-store",
     });
   } catch (error) {
-    if ((error as Error).name === "AbortError") throw error;
+    if (options.signal?.aborted) throw error;
     throw new ApiError("network", 0, null);
+  } finally {
+    clearTimeout(timeout);
+    options.signal?.removeEventListener("abort", abort);
   }
   const data = (await response.json().catch(() => null)) as
     | (T & { error?: { code: string; details: Record<string, unknown> | null } })
