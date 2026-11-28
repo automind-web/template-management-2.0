@@ -14,7 +14,13 @@ import { cn } from "@/lib/utils";
 import { useCabinet } from "./cabinet-context";
 import { HotkeysHelp } from "./hotkeys-help";
 
-type NavItem = { key: string; href: string; label: string; short?: string; icon: LucideIcon };
+type NavItem = {
+  key: string;
+  href: string;
+  label: string;
+  short?: string;
+  icon: LucideIcon;
+};
 
 /** Непрочитанные уведомления: обновляются при переходах и раз в минуту. */
 function useUnread(pathname: string) {
@@ -35,23 +41,62 @@ function useUnread(pathname: string) {
   return unread;
 }
 
+/** Число непрочитанных — один запрос на весь кабинет (боковое меню и нижняя панель берут его отсюда). */
+const UnreadCtx = React.createContext(0);
+
 /** Общие данные меню для боковой и нижней панели. */
 function useNav() {
   const { me } = useCabinet();
   const pathname = usePathname() ?? "/";
-  const unread = useUnread(pathname);
+  const unread = React.useContext(UnreadCtx);
   const main: NavItem[] = [
     { key: "tasks", href: "/tasks", label: t("nav.tasks"), icon: ListTodo },
-    { key: "assistant", href: "/assistant", label: t("nav.assistant"), short: t("nav.assistantShort"), icon: MessageCircle },
-    ...(me.capabilities.viewStats ? [{ key: "stats", href: "/stats", label: t("nav.stats"), icon: BarChart3 }] : []),
-    { key: "notifications", href: "/notifications", label: t("nav.notifications"), short: t("nav.notificationsShort"), icon: Bell },
+    {
+      key: "assistant",
+      href: "/assistant",
+      label: t("nav.assistant"),
+      short: t("nav.assistantShort"),
+      icon: MessageCircle,
+    },
+    ...(me.capabilities.viewStats
+      ? [
+          {
+            key: "stats",
+            href: "/stats",
+            label: t("nav.stats"),
+            icon: BarChart3,
+          },
+        ]
+      : []),
+    {
+      key: "notifications",
+      href: "/notifications",
+      label: t("nav.notifications"),
+      short: t("nav.notificationsShort"),
+      icon: Bell,
+    },
   ];
   const settings: NavItem | null = me.capabilities.viewSystemSettings
-    ? { key: "settings", href: "/settings", label: t("nav.settings"), icon: Settings }
+    ? {
+        key: "settings",
+        href: "/settings",
+        label: t("nav.settings"),
+        icon: Settings,
+      }
     : me.capabilities.manageTeam
-      ? { key: "settings", href: "/settings", label: t("nav.team"), icon: Users }
+      ? {
+          key: "settings",
+          href: "/settings",
+          label: t("nav.team"),
+          icon: Users,
+        }
       : null;
-  const profile: NavItem = { key: "profile", href: "/profile", label: t("nav.profile"), icon: UserRound };
+  const profile: NavItem = {
+    key: "profile",
+    href: "/profile",
+    label: t("nav.profile"),
+    icon: UserRound,
+  };
   const isActive = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
   return { me, main, settings, profile, isActive, unread, pathname };
 }
@@ -157,11 +202,17 @@ function SideLink({ item, nav, tip }: { item: NavItem; nav: Nav; tip: ReturnType
       aria-current={active ? "page" : undefined}
       className={cn(
         "group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-[15px] font-semibold transition-all duration-150 nav-collapsed:justify-center nav-collapsed:px-0",
-        active ? "bg-surface text-foreground shadow-[0_1px_2px_#1d24330f,0_4px_14px_-8px_#1d243326]" : "text-foreground/75 hover:bg-muted hover:text-foreground",
+        active
+          ? "bg-surface text-foreground shadow-[0_1px_2px_#1d24330f,0_4px_14px_-8px_#1d243326]"
+          : "text-foreground/75 hover:bg-muted hover:text-foreground",
       )}
     >
       {active ? <span aria-hidden className="absolute bottom-2 left-0 top-2 w-[3px] rounded-full bg-primary" /> : null}
-      <Icon aria-hidden className={cn("size-[19px] shrink-0 transition-colors", active ? "text-primary" : "text-foreground/55 group-hover:text-foreground/80")} strokeWidth={1.75} />
+      <Icon
+        aria-hidden
+        className={cn("size-[19px] shrink-0 transition-colors", active ? "text-primary" : "text-foreground/55 group-hover:text-foreground/80")}
+        strokeWidth={1.75}
+      />
       <span className="flex-1 break-anywhere nav-collapsed:sr-only">{item.label}</span>
       <NavBadge item={item} nav={nav} />
     </Link>
@@ -199,7 +250,11 @@ function Sidebar({ collapsed, toggle }: { collapsed: boolean; toggle: () => void
           title={collapsed ? undefined : toggleLabel}
           className="inline-flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-lg text-foreground/55 transition-colors hover:bg-muted hover:text-foreground"
         >
-          {collapsed ? <PanelLeftOpen aria-hidden className="size-[19px]" strokeWidth={1.75} /> : <PanelLeftClose aria-hidden className="size-[19px]" strokeWidth={1.75} />}
+          {collapsed ? (
+            <PanelLeftOpen aria-hidden className="size-[19px]" strokeWidth={1.75} />
+          ) : (
+            <PanelLeftClose aria-hidden className="size-[19px]" strokeWidth={1.75} />
+          )}
         </button>
       </div>
       <nav id="side-nav" aria-label={t("nav.main")} className="flex min-h-0 flex-1 flex-col justify-between gap-4 overflow-y-auto overflow-x-hidden">
@@ -265,11 +320,18 @@ function TabButton({
 }) {
   const body = (
     <>
-      <span className={cn("relative flex h-8 w-14 items-center justify-center rounded-full transition-colors duration-200", active ? "bg-primary/12 text-primary" : "text-foreground/60")}>
+      <span
+        className={cn(
+          "relative flex h-8 w-14 items-center justify-center rounded-full transition-colors duration-200",
+          active ? "bg-primary/12 text-primary" : "text-foreground/60",
+        )}
+      >
         <Icon aria-hidden className="size-[22px]" strokeWidth={active ? 2.1 : 1.8} />
         {badge}
       </span>
-      <span className={cn("max-w-full truncate px-0.5 text-[11px] leading-4", active ? "font-bold text-primary" : "font-semibold text-foreground/70")}>{label}</span>
+      <span className={cn("max-w-full truncate px-0.5 text-[11px] leading-4", active ? "font-bold text-primary" : "font-semibold text-foreground/70")}>
+        {label}
+      </span>
     </>
   );
   const cls = "flex min-w-0 flex-1 select-none flex-col items-center justify-center gap-0.5 pb-1.5 pt-2 transition-transform active:scale-95";
@@ -308,7 +370,14 @@ function TabBar() {
       >
         <div className="mx-auto flex h-16 max-w-xl items-stretch px-1">
           {tabs.map((item) => (
-            <TabButton key={item.href} href={item.href} icon={item.icon} label={item.short ?? item.label} active={nav.isActive(item.href)} badge={<NavBadge item={item} nav={nav} compact />} />
+            <TabButton
+              key={item.href}
+              href={item.href}
+              icon={item.icon}
+              label={item.short ?? item.label}
+              active={nav.isActive(item.href)}
+              badge={<NavBadge item={item} nav={nav} compact />}
+            />
           ))}
           {rest.length ? (
             <TabButton icon={Ellipsis} label={t("nav.more")} active={moreActive || moreOpen} expanded={moreOpen} onClick={() => setOpenedAt(nav.pathname)} />
@@ -350,7 +419,12 @@ function TabBar() {
                           active ? "border-primary/40 bg-primary/5" : "border-border bg-background active:bg-muted",
                         )}
                       >
-                        <span className={cn("relative grid size-10 place-items-center rounded-xl", active ? "bg-primary text-primary-foreground" : "bg-primary/10 text-primary")}>
+                        <span
+                          className={cn(
+                            "relative grid size-10 place-items-center rounded-xl",
+                            active ? "bg-primary text-primary-foreground" : "bg-primary/10 text-primary",
+                          )}
+                        >
                           <Icon aria-hidden className="size-5" strokeWidth={1.9} />
                           <NavBadge item={item} nav={nav} compact />
                         </span>
@@ -377,6 +451,7 @@ function subscribeNav(listener: () => void) {
 }
 
 export function CabinetShell({ children }: { children: React.ReactNode }) {
+  const unread = useUnread(usePathname() ?? "/");
   // Состояние уже выставлено на <html> скриптом до отрисовки; React читает его оттуда.
   const collapsed = React.useSyncExternalStore(subscribeNav, collapsedNow, () => false);
 
@@ -406,18 +481,23 @@ export function CabinetShell({ children }: { children: React.ReactNode }) {
   }, [toggleNav]);
 
   return (
-    <div className="flex min-h-screen">
-      <a href="#content" className="sr-only focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:z-50 focus:rounded-lg focus:bg-surface focus:px-3 focus:py-2">
-        {t("nav.skipToContent")}
-      </a>
-      <aside className="sticky top-0 hidden h-screen w-64 shrink-0 border-r border-border bg-background transition-[width] duration-200 ease-out motion-reduce:transition-none md:block nav-collapsed:w-[76px]">
-        <Sidebar collapsed={collapsed} toggle={toggleNav} />
-      </aside>
-      <div id="content" className="flex min-w-0 flex-1 flex-col pb-[var(--tabbar-h)] md:pb-0">
-        {children}
+    <UnreadCtx.Provider value={unread}>
+      <div className="flex min-h-screen">
+        <a
+          href="#content"
+          className="sr-only focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:z-50 focus:rounded-lg focus:bg-surface focus:px-3 focus:py-2"
+        >
+          {t("nav.skipToContent")}
+        </a>
+        <aside className="sticky top-0 hidden h-screen w-64 shrink-0 border-r border-border bg-background transition-[width] duration-200 ease-out motion-reduce:transition-none md:block nav-collapsed:w-[76px]">
+          <Sidebar collapsed={collapsed} toggle={toggleNav} />
+        </aside>
+        <div id="content" className="flex min-w-0 flex-1 flex-col pb-[var(--tabbar-h)] md:pb-0">
+          {children}
+        </div>
+        <TabBar />
+        <HotkeysHelp />
       </div>
-      <TabBar />
-      <HotkeysHelp />
-    </div>
+    </UnreadCtx.Provider>
   );
 }

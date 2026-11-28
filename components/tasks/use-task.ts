@@ -5,30 +5,10 @@ import { api, ApiError } from "@/lib/api";
 import { newOpId } from "@/lib/op";
 import type { TaskCard } from "./types";
 
-export type Notice = { tone: "success" | "neutral" | "danger"; text: string } | null;
-
 /**
- * Состояние карточки и отправка изменений.
- * Каждое действие несёт version и opId: повтор нажатия/доставки не создаёт второй записи,
+ * Действие с карточкой: каждое несёт version и opId — повтор нажатия или доставки не создаёт второй записи;
  * при конфликте показывается актуальное состояние, а введённый текст остаётся в форме.
  */
-export function useTaskCard(taskId: string) {
-  const [card, setCard] = React.useState<TaskCard | null>(null);
-  const [loadError, setLoadError] = React.useState<string | null>(null);
-
-  const load = React.useCallback(() => {
-    setLoadError(null);
-    api<TaskCard>("GET", `/api/tasks/${taskId}`)
-      .then(setCard)
-      .catch((e) => setLoadError(e instanceof ApiError ? e.code : "network"));
-  }, [taskId]);
-
-  React.useEffect(load, [load]);
-
-  return { card, setCard, load, loadError };
-}
-
-/** Действие с карточкой: один opId на попытку, сбрасывается после успеха или конфликта. */
 export function useTaskAction(setCard: (c: TaskCard) => void) {
   const opId = React.useRef(newOpId());
   return React.useCallback(

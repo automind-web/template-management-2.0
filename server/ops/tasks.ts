@@ -16,7 +16,7 @@ import { AppError, forbidden, notFound } from "../errors";
 import { isDirector, isManager, resolveBranch, resolveBranchScope } from "../permissions";
 import { dateInZone, dueMomentInZone, timeInZone } from "../time";
 import { afterTaskChange, notifyTask } from "../notify/queue";
-import { actorRoles, allowedTransitions, loadWorkflow, type Transition, type Workflow } from "../workflow";
+import { actorRoles, allowedTransitions, loadWorkflow, type TaskRef, type Transition, type Workflow } from "../workflow";
 
 type TaskRow = typeof schema.tasks.$inferSelect;
 type EventInsert = typeof schema.taskEvents.$inferInsert;
@@ -594,7 +594,7 @@ export async function deleteAttachment(actor: Actor, attachmentId: string) {
 
 // ---------- Карточка ----------
 
-function primaryTransition(actor: Actor, task: TaskRow, list: Transition[], wf: Workflow): Transition | null {
+function primaryTransition(actor: Actor, task: TaskRef, list: Transition[], wf: Workflow): Transition | null {
   if (list.length === 0) return null;
   const roles = actorRoles(actor, task);
   const cat = (t: Transition) => wf.byKey.get(t.to)?.category;
@@ -608,9 +608,9 @@ function primaryTransition(actor: Actor, task: TaskRow, list: Transition[], wf: 
 }
 
 export async function getTaskCard(actor: Actor, taskId: string) {
-  const task = await loadTask(actor, taskId);
   const db = getDb();
-  const wf = await loadWorkflow(actor.company.id);
+  // Задача и процесс читаются параллельно — карточка открывается быстрее.
+  const [task, wf] = await Promise.all([loadTask(actor, taskId), loadWorkflow(actor.company.id)]);
   const [events, comments, files] = await Promise.all([
     db.select().from(schema.taskEvents).where(eq(schema.taskEvents.taskId, task.id)).orderBy(desc(schema.taskEvents.createdAt)).limit(300),
     db.select().from(schema.taskComments).where(eq(schema.taskComments.taskId, task.id)).orderBy(asc(schema.taskComments.createdAt)).limit(500),
@@ -807,7 +807,8 @@ export async function listTasks(actor: Actor, query: z.infer<typeof listQuerySch
   if (statusKeys.length) withStatus.push(inArray(schema.tasks.statusKey, statusKeys));
 
   const limit = query.limit ?? 300;
-  const rows = await db
+  // Список и все счётчики — параллельно: одна волна запросов к базе вместо четырёх подряд.
+  const rowsQuery = db
     .select({
       id: schema.tasks.id,
       number: schema.tasks.number,
@@ -832,23 +833,28 @@ export async function listTasks(actor: Actor, query: z.infer<typeof listQuerySch
     .limit(limit + 1);
 
   // Счётчики — тот же запрос без фильтра статуса (одинаковы для списка и канбана).
-  const counts = await db
-    .select({ statusKey: schema.tasks.statusKey, n: sql<number>`count(*)` })
-    .from(schema.tasks)
-    .where(and(...base, isNull(schema.tasks.cancelledAt)))
-    .groupBy(schema.tasks.statusKey);
-  const [overdue] = await db
-    .select({ n: sql<number>`count(*)` })
-    .from(schema.tasks)
-    .where(and(...base, isNull(schema.tasks.cancelledAt), isNotNull(schema.tasks.dueAt), lt(schema.tasks.dueAt, now), notDone));
-  const [cancelled] = await db
-    .select({ n: sql<number>`count(*)` })
-    .from(schema.tasks)
-    .where(and(...base, isNotNull(schema.tasks.cancelledAt)));
+  const [rows, counts, [overdue], [cancelled]] = await Promise.all([
+    rowsQuery,
+    db
+      .select({ statusKey: schema.tasks.statusKey, n: sql<number>`count(*)` })
+      .from(schema.tasks)
+      .where(and(...base, isNull(schema.tasks.cancelledAt)))
+      .groupBy(schema.tasks.statusKey),
+    db
+      .select({ n: sql<number>`count(*)` })
+      .from(schema.tasks)
+      .where(and(...base, isNull(schema.tasks.cancelledAt), isNotNull(schema.tasks.dueAt), lt(schema.tasks.dueAt, now), notDone)),
+    db
+      .select({ n: sql<number>`count(*)` })
+      .from(schema.tasks)
+      .where(and(...base, isNotNull(schema.tasks.cancelledAt))),
+  ]);
 
   const items = rows.slice(0, limit).map((r) => {
     const checklist = JSON.parse(r.checklistJson) as { done: boolean }[];
     const status = wf.byKey.get(r.statusKey);
+    const moves = allowedTransitions(actor, r, wf);
+    const primary = primaryTransition(actor, r, moves, wf);
     return {
       id: r.id,
       number: r.number,
@@ -864,11 +870,15 @@ export async function listTasks(actor: Actor, query: z.infer<typeof listQuerySch
       cancelled: Boolean(r.cancelledAt),
       checklist: { total: checklist.length, done: checklist.filter((c) => c.done).length },
       version: r.version,
-      /** Куда участник может перенести задачу (подсветка колонок канбана). */
-      moves: allowedTransitions(actor, r, wf).map((t) => ({
+      /** Куда участник может перенести задачу: доска, меню и быстрое действие в строке — без загрузки карточки. */
+      moves: moves.map((t) => ({
         to: t.to,
+        toName: wf.byKey.get(t.to)?.name ?? t.to,
+        kind: eventTypeFor(wf, t.from, t.to),
         needsForm: Boolean(t.requires.comment || t.requires.result),
       })),
+      /** Основное действие участника (как в карточке). */
+      primary: primary?.to ?? null,
     };
   });
 

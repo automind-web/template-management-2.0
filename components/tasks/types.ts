@@ -15,7 +15,9 @@ export type TaskListItem = {
   cancelled: boolean;
   checklist: { total: number; done: number };
   version: number;
-  moves: { to: string; needsForm: boolean }[];
+  moves: { to: string; toName: string; kind: TransitionInfo["kind"]; needsForm: boolean }[];
+  /** Основное действие участника, как в карточке. */
+  primary: string | null;
 };
 
 export type TaskList = {
