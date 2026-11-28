@@ -15,6 +15,7 @@ export type TaskListItem = {
   cancelled: boolean;
   checklist: { total: number; done: number };
   version: number;
+  saving?: boolean;
   moves: { to: string; toName: string; kind: TransitionInfo["kind"]; needsForm: boolean }[];
   /** Основное действие участника, как в карточке. */
   primary: string | null;

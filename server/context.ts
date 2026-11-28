@@ -32,14 +32,19 @@ export async function loadActorByToken(token: string | null | undefined): Promis
 
 export async function loadActorForSession(session: SessionRow): Promise<Actor | null> {
   const db = getDb();
-  const user = await db.query.users.findFirst({ where: eq(schema.users.id, session.userId) });
+  const [user, links] = await Promise.all([
+    db.query.users.findFirst({ where: eq(schema.users.id, session.userId) }),
+    db.select({ membership: schema.memberships, company: schema.companies })
+      .from(schema.memberships)
+      .innerJoin(schema.companies, eq(schema.companies.id, schema.memberships.companyId))
+      .where(and(eq(schema.memberships.userId, session.userId), isNull(schema.memberships.revokedAt)))
+      .limit(1),
+  ]);
   if (!user || user.disabledAt) return null;
-  const membership = await db.query.memberships.findFirst({
-    where: and(eq(schema.memberships.userId, user.id), isNull(schema.memberships.revokedAt)),
-  });
-  if (!membership) throw new AppError("access_revoked", 403);
-  const company = await db.query.companies.findFirst({ where: eq(schema.companies.id, membership.companyId) });
-  if (!company) throw new AppError("access_revoked", 403);
+  const link = links[0];
+  if (!link) throw new AppError("access_revoked", 403);
+  const { membership, company } = link;
+  const settingsPromise = loadSettings(company.id);
 
   let branches: BranchRef[];
   if (membership.role === "director") {
@@ -75,7 +80,7 @@ export async function loadActorForSession(session: SessionRow): Promise<Actor | 
     },
     company: { id: company.id, name: company.name, timezone: company.timezone, locale: company.locale },
     branches,
-    settings: await loadSettings(company.id),
+    settings: await settingsPromise,
     channel: "web",
   };
 }

@@ -8,6 +8,8 @@
 import * as React from "react";
 import { api, ApiError } from "@/lib/api";
 import { errorText } from "@/lib/i18n";
+import { mergeTaskList, replaceInList } from "./cache-merge";
+import { needsTransitionForm } from "@/lib/task-transition";
 import type { TaskCard, TaskList, TaskListItem } from "./types";
 
 type Entry<T> = { data: T; at: number };
@@ -75,7 +77,7 @@ export function itemFromCard(card: TaskCard, prev?: TaskListItem): TaskListItem 
       to: tr.to,
       toName: tr.toName,
       kind: tr.kind,
-      needsForm: tr.requires.comment || tr.requires.result,
+      needsForm: needsTransitionForm(tr.requires, card.attachments.length),
     })),
     primary: card.primary,
   };
@@ -84,30 +86,62 @@ export function itemFromCard(card: TaskCard, prev?: TaskListItem): TaskListItem 
 /** Карточка изменилась: обновить её, строку во всех списках и тихо пересчитать счётчики. */
 export function applyCard(card: TaskCard, selfId?: string) {
   cards.set(card.task.id, { data: card, at: Date.now() });
-  for (const entry of lists.values()) {
+  const indexed = itemFromCard(card, items.get(card.task.id));
+  if (selfId) indexed.assignee.self = indexed.assignee.id === selfId;
+  indexed.saving = pendingTasks.has(indexed.id);
+  items.set(indexed.id, indexed);
+  for (const [query, entry] of lists) {
     const i = entry.data.items.findIndex((x) => x.id === card.task.id);
     if (i < 0) continue;
     const prev = entry.data.items[i]!;
     const next = itemFromCard(card, prev);
     if (selfId) next.assignee.self = next.assignee.id === selfId;
-    const copy = entry.data.items.slice();
-    copy[i] = next;
-    entry.data = { ...entry.data, items: copy };
+    next.saving = pendingTasks.has(next.id);
+    entry.data = replaceInList(entry.data, next.id, next);
+    const params = new URLSearchParams(query);
+    const status = params.get("status");
+    const assignee = params.get("assignee");
+    if (!next.saving && ((status && (status === "_cancelled" ? !next.cancelled : next.cancelled || status !== next.status.key)) ||
+        (!status && next.cancelled) || (entry.data.view === "mine" && !next.assignee.self) ||
+        (assignee && (assignee === "me" ? !next.assignee.self : next.assignee.id !== assignee)))) {
+      entry.data = { ...entry.data, items: entry.data.items.filter((x) => x.id !== next.id) };
+      entry.at = 0;
+    }
     items.set(next.id, next);
   }
-  invalidateLists();
+  emit();
 }
 
-/** Временно заменить строку (мгновенный отклик до ответа сервера). */
+/** Patch only this task; unrelated saves and the page's DOM are preserved. */
 export function patchItem(id: string, patch: Partial<TaskListItem>) {
+  const previous = items.get(id);
+  if (previous) items.set(id, { ...previous, ...patch });
   for (const entry of lists.values()) {
-    const i = entry.data.items.findIndex((x) => x.id === id);
-    if (i < 0) continue;
-    const copy = entry.data.items.slice();
-    copy[i] = { ...copy[i]!, ...patch };
-    entry.data = { ...entry.data, items: copy };
+    const before = entry.data.items.find((x) => x.id === id);
+    if (before) entry.data = replaceInList(entry.data, id, { ...before, ...patch });
   }
   emit();
+}
+
+const pendingTasks = new Set<string>();
+const actionQueues = new Map<string, Promise<unknown>>();
+export function taskIsSaving(id: string) { return pendingTasks.has(id); }
+export function setTaskSaving(id: string, saving: boolean) {
+  if (saving) pendingTasks.add(id); else pendingTasks.delete(id);
+  patchItem(id, { saving });
+  if (!saving) {
+    const card = cards.get(id)?.data;
+    if (card) applyCard(card);
+  }
+}
+export function useTaskSaving(id: string) { useStore(); return taskIsSaving(id); }
+export function cachedCard(id: string) { return cards.get(id)?.data ?? null; }
+export function queueTaskAction<T>(id: string, action: () => Promise<T>): Promise<T> {
+  const previous = actionQueues.get(id) ?? Promise.resolve();
+  const next = previous.catch(() => {}).then(action);
+  actionQueues.set(id, next);
+  void next.finally(() => { if (actionQueues.get(id) === next) actionQueues.delete(id); }).catch(() => {});
+  return next;
 }
 
 /** Ключ строки не меняется, когда временная строка заменяется настоящей — без повторной анимации. */
@@ -152,20 +186,25 @@ export function invalidateLists() {
 /** Карточка заранее — при наведении на строку, чтобы открылась мгновенно. */
 export function prefetchCard(id: string) {
   const cached = cards.get(id);
+  if (pendingTasks.has(id)) return;
   if (cached && Date.now() - cached.at < 15_000) return;
   void once(`card:${id}`, () => api<TaskCard>("GET", `/api/tasks/${id}`))
     .then((card) => {
-      cards.set(id, { data: card, at: Date.now() });
-      emit();
+      if (!pendingTasks.has(id) && card.task.version >= (cards.get(id)?.data.task.version ?? 0)) {
+        cards.set(id, { data: card, at: Date.now() });
+        emit();
+      }
     })
     .catch(() => {});
 }
 
 export function loadCard(id: string): Promise<TaskCard> {
   return once(`card:${id}`, () => api<TaskCard>("GET", `/api/tasks/${id}`)).then((card) => {
-    cards.set(id, { data: card, at: Date.now() });
-    emit();
-    return card;
+    if (!pendingTasks.has(id) && card.task.version >= (cards.get(id)?.data.task.version ?? 0)) {
+      cards.set(id, { data: card, at: Date.now() });
+      emit();
+    }
+    return cards.get(id)?.data ?? card;
   });
 }
 
@@ -190,8 +229,9 @@ export function useTaskList(query: string | null, epoch = 0) {
     setRefreshing(true);
     once(`list:${query}`, () => api<TaskList>("GET", `/api/tasks?${query}`))
       .then((data) => {
-        lists.set(query, { data, at: Date.now() });
-        indexList(data);
+        const merged = mergeTaskList(data, items, lists.get(query)?.data.items);
+        lists.set(query, { data: merged, at: Date.now() });
+        indexList(merged);
         setError(null);
         emit();
       })
@@ -205,9 +245,17 @@ export function useTaskList(query: string | null, epoch = 0) {
   React.useEffect(() => {
     if (!query) return;
     const entry = lists.get(query);
-    if (!entry || Date.now() - entry.at > 4_000) refresh();
+    if (!entry || Date.now() - entry.at > 30_000) refresh();
   }, [query, refresh, epoch, gen]);
 
+  React.useEffect(() => {
+    const focus = () => {
+      const entry = query ? lists.get(query) : undefined;
+      if (document.visibilityState === "visible" && (!entry || Date.now() - entry.at > 30_000)) refresh();
+    };
+    window.addEventListener("focus", focus);
+    return () => window.removeEventListener("focus", focus);
+  }, [query, refresh]);
   const entry = query ? lists.get(query) : undefined;
   if (entry) shown.current = entry.data;
   // Пока грузится новая выдача (другой фильтр), остаётся прежняя — без пустого экрана.
@@ -230,7 +278,10 @@ export function useTaskCard(id: string) {
       if (!cards.get(id)) setLoadError(e instanceof ApiError ? e.code : "network");
     });
   }, [id]);
-  React.useEffect(load, [load]);
+  React.useEffect(() => {
+    const cached = cards.get(id);
+    if (!pendingTasks.has(id) && (!cached || Date.now() - cached.at > 30_000)) load();
+  }, [id, load]);
   const setCard = React.useCallback((card: TaskCard) => applyCard(card), []);
   return {
     card: cards.get(id)?.data ?? null,

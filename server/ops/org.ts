@@ -26,11 +26,11 @@ import { seedWorkflow } from "./setup";
 
 export async function me(actor: Actor) {
   const db = getDb();
-  const statuses = await db
+  const [statuses, openai, whapi] = await Promise.all([db
     .select()
     .from(schema.taskStatuses)
     .where(and(eq(schema.taskStatuses.companyId, actor.company.id), isNull(schema.taskStatuses.archivedAt)))
-    .orderBy(asc(schema.taskStatuses.sort));
+    .orderBy(asc(schema.taskStatuses.sort)), secretInfo("openai"), secretInfo("whapi")]);
   const branch = actor.membership.branchId ? actor.branches.find((b) => b.id === actor.membership.branchId) : null;
   return {
     user: {
@@ -52,7 +52,7 @@ export async function me(actor: Actor) {
     branding: { accent: actor.settings.accent, logoUrl: actor.settings.logoUrl, fontFamily: actor.settings.fontFamily },
     assistantName: actor.settings.assistantName,
     /** Для индикатора в меню: умный режим помощника и WhatsApp подключены. */
-    system: { smartAssistant: (await secretInfo("openai")).set, whatsapp: (await secretInfo("whapi")).set },
+    system: { smartAssistant: openai.set, whatsapp: whapi.set },
   };
 }
 

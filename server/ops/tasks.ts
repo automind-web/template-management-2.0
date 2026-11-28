@@ -821,6 +821,8 @@ export async function listTasks(actor: Actor, query: z.infer<typeof listQuerySch
       dueDate: schema.tasks.dueDate,
       dueAt: schema.tasks.dueAt,
       version: schema.tasks.version,
+      requiresResult: schema.tasks.requiresResult,
+      requiresAttachment: schema.tasks.requiresAttachment,
       isPersonal: schema.tasks.isPersonal,
       cancelledAt: schema.tasks.cancelledAt,
       checklistJson: schema.tasks.checklistJson,
@@ -875,7 +877,7 @@ export async function listTasks(actor: Actor, query: z.infer<typeof listQuerySch
         to: t.to,
         toName: wf.byKey.get(t.to)?.name ?? t.to,
         kind: eventTypeFor(wf, t.from, t.to),
-        needsForm: Boolean(t.requires.comment || t.requires.result),
+        needsForm: Boolean(t.requires.comment || (t.requires.result && (r.requiresResult || r.requiresAttachment || t.requires.attachment))),
       })),
       /** Основное действие участника (как в карточке). */
       primary: primary?.to ?? null,

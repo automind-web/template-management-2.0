@@ -227,12 +227,12 @@ export async function rememberedOrigin(): Promise<string> {
 let knownOrigin: string | null = null;
 export async function rememberOrigin(origin: string): Promise<void> {
   if (knownOrigin === origin || !/^https?:\/\//.test(origin)) return;
-  knownOrigin = origin;
   const now = Date.now();
   await getDb()
     .insert(schema.settings)
     .values({ scope: "company", scopeId: "system", key: "origin", valueJson: JSON.stringify(origin), updatedAt: now })
     .onConflictDoUpdate({ target: [schema.settings.scope, schema.settings.scopeId, schema.settings.key], set: { valueJson: JSON.stringify(origin), updatedAt: now } });
+  knownOrigin = origin;
 }
 
 type Delivery = typeof schema.notificationDeliveries.$inferSelect;
@@ -278,24 +278,33 @@ async function deliver(d: Delivery): Promise<{ status: "sent" | "cancelled" | "r
     .where(and(eq(schema.pushSubscriptions.userId, d.userId), isNull(schema.pushSubscriptions.revokedAt)));
   if (subs.length === 0) return { status: "cancelled", error: "no_subscription" };
   let delivered = 0;
+  let transientFailure = false;
   for (const s of subs) {
     try {
+      const session = s.sessionId ? await db.query.sessions.findFirst({ where: and(eq(schema.sessions.id, s.sessionId), isNull(schema.sessions.revokedAt)) }) : null;
+      if (!session || session.expiresAt <= Date.now()) {
+        await db.update(schema.pushSubscriptions).set({ revokedAt: Date.now() }).where(eq(schema.pushSubscriptions.id, s.id));
+        continue;
+      }
       const r = await sendWebPush(
         s,
         { title: d.title, body: d.body, url: d.url, tag: d.id },
         { publicKey: vapid.publicKey, privateKey: vapid.privateKey, subject: origin || "mailto:noreply@example.com" },
       );
       if (r.ok) delivered++;
+      else if (!r.gone) transientFailure = true;
       if (r.gone) await db.update(schema.pushSubscriptions).set({ revokedAt: Date.now() }).where(eq(schema.pushSubscriptions.id, s.id));
     } catch {
-      /* следующая подписка */
+      transientFailure = true;
     }
   }
-  return delivered ? { status: "sent" } : { status: "retry", error: "push_failed" };
+  // A stable notification tag replaces duplicates on devices that already received a retry.
+  if (transientFailure) return { status: "retry", error: "push_failed" };
+  return delivered ? { status: "sent" } : { status: "cancelled", error: "no_subscription" };
 }
 
 /** Обработка порции очереди. userId — только доставки этого участника (при открытии «Уведомлений»). */
-export async function processQueue(opts: { userId?: string; limit?: number } = {}): Promise<number> {
+export async function processQueue(opts: { userId?: string; limit?: number; channel?: Channel } = {}): Promise<number> {
   const db = getDb();
   const now = Date.now();
   const due = await db
@@ -309,20 +318,22 @@ export async function processQueue(opts: { userId?: string; limit?: number } = {
           and(eq(schema.notificationDeliveries.status, "sending"), lt(schema.notificationDeliveries.lockedUntil, now)),
         ),
         opts.userId ? eq(schema.notificationDeliveries.userId, opts.userId) : undefined,
+        opts.channel ? eq(schema.notificationDeliveries.channel, opts.channel) : undefined,
       ),
     )
     .orderBy(asc(schema.notificationDeliveries.scheduledAt))
     .limit(opts.limit ?? 25);
 
   let processed = 0;
-  for (const row of due) {
+  const deliverRow = async (row: Delivery) => {
     // Захват строки: параллельный обработчик её не получит.
     const claimed = await db
       .update(schema.notificationDeliveries)
       .set({ status: "sending", lockedUntil: now + 60_000 })
-      .where(and(eq(schema.notificationDeliveries.id, row.id), eq(schema.notificationDeliveries.status, row.status)))
+      .where(and(eq(schema.notificationDeliveries.id, row.id), eq(schema.notificationDeliveries.status, row.status),
+        row.status === "sending" ? lt(schema.notificationDeliveries.lockedUntil, now) : undefined))
       .returning({ id: schema.notificationDeliveries.id });
-    if (claimed.length !== 1) continue;
+    if (claimed.length !== 1) return;
     let result: Awaited<ReturnType<typeof deliver>>;
     try {
       result = await deliver(row);
@@ -337,12 +348,14 @@ export async function processQueue(opts: { userId?: string; limit?: number } = {
     else Object.assign(patch, { status: result.status === "cancelled" ? "cancelled" : "failed", attempts });
     await db.update(schema.notificationDeliveries).set(patch).where(eq(schema.notificationDeliveries.id, row.id));
     processed++;
-  }
+  };
+  for (let i = 0; i < due.length; i += 4) await Promise.all(due.slice(i, i + 4).map(deliverRow));
   return processed;
 }
 
 /** Не чаще раза в 15 секунд (для ctx.waitUntil после запросов). */
-export async function maybeProcessQueue(): Promise<void> {
+export async function maybeProcessQueue(force = false): Promise<void> {
+  if (force) { await processQueue({ limit: 25 }); return; }
   const db = getDb();
   const now = Date.now();
   const key = { scope: "company" as const, scopeId: "system", key: "queue_run" };
@@ -369,7 +382,7 @@ export async function maybeProcessQueue(): Promise<void> {
 // ---------- Входящие ----------
 
 export async function inbox(actor: Actor) {
-  await processQueue({ userId: actor.user.id, limit: 20 });
+  await processQueue({ userId: actor.user.id, limit: 20, channel: "cabinet" });
   const db = getDb();
   const rows = await db
     .select()
@@ -439,4 +452,20 @@ export async function afterPrefsChange(actor: Actor): Promise<void> {
     .set({ status: "cancelled" })
     .where(and(eq(schema.notificationDeliveries.userId, actor.user.id), eq(schema.notificationDeliveries.status, "pending"), inArray(schema.notificationDeliveries.channel, ["whatsapp", "push"])));
   for (const t of tasks) await afterTaskChange(t.id);
+}
+
+/** A heartbeat distinguishes an actual unattended scheduler from ordinary page requests. */
+export async function recordScheduledRun(): Promise<void> {
+  const now = Date.now();
+  await getDb().insert(schema.settings).values({ scope: "company", scopeId: "system", key: "notify_scheduled_at", valueJson: String(now), updatedAt: now })
+    .onConflictDoUpdate({ target: [schema.settings.scope, schema.settings.scopeId, schema.settings.key], set: { valueJson: String(now), updatedAt: now } });
+}
+
+export async function deliveryHealth(actor: Actor) {
+  const [heartbeat, [failed]] = await Promise.all([
+    getDb().query.settings.findFirst({ where: and(eq(schema.settings.scope, "company"), eq(schema.settings.scopeId, "system"), eq(schema.settings.key, "notify_scheduled_at")) }),
+    getDb().select({ n: sql<number>`count(*)` }).from(schema.notificationDeliveries).where(and(eq(schema.notificationDeliveries.userId, actor.user.id), eq(schema.notificationDeliveries.status, "failed"))),
+  ]);
+  const lastRunAt = heartbeat ? Number(heartbeat.valueJson) : null;
+  return { lastRunAt, scheduled: Boolean(lastRunAt && Date.now() - lastRunAt < 180_000), failed: Number(failed?.n ?? 0) };
 }

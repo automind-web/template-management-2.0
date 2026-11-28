@@ -2,7 +2,7 @@
  * Единый серверный слой операций для сайта (а позже — веб-помощника, WhatsApp и плагина директора).
  * Каждая операция получает Actor, загруженный из БД на этот запрос, и сама проверяет права.
  */
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { requireActor, sessionTokenFromRequest, loadActorByToken } from "./context";
 import { AppError, notFound } from "./errors";
 import { assertSameOrigin, clearSessionCookie, errorResponse, json, publicOrigin, readJson, sessionCookie } from "./http";
@@ -14,6 +14,7 @@ import * as system from "./ops/system";
 import * as notify from "./notify/queue";
 import { loadPrefs, prefsSchema, savePrefs } from "./notify/prefs";
 import { pushKeys } from "./integrations";
+import { sendWebPush } from "./notify/webpush";
 import { whapiConfigured } from "./whatsapp/whapi";
 import { getDb, schema } from "./db";
 import { newId } from "./crypto";
@@ -224,8 +225,7 @@ route("POST", "/api/members/:userId/reset-link", async ({ request, params }) => 
 // ---------- Задачи ----------
 
 /** После изменения возвращается актуальная карточка: фактический статус и следующее действие. */
-const cardAfter = async (request: Request, r: { taskId: string; replayed?: boolean }) => {
-  const actor = await requireActor(request);
+const cardAfter = async (actor: Awaited<ReturnType<typeof requireActor>>, r: { taskId: string; replayed?: boolean }) => {
   return json({ ...(await tasks.getTaskCard(actor, r.taskId)), replayed: Boolean(r.replayed) });
 };
 
@@ -251,27 +251,27 @@ route("GET", "/api/tasks/:id", async ({ request, params }) => json(await tasks.g
 
 route("PATCH", "/api/tasks/:id", async ({ request, params }) => {
   const actor = await requireActor(request);
-  return cardAfter(request, await tasks.updateTask(actor, params.id!, await readJson(request, tasks.updateTaskSchema)));
+  return cardAfter(actor, await tasks.updateTask(actor, params.id!, await readJson(request, tasks.updateTaskSchema)));
 });
 
 route("POST", "/api/tasks/:id/status", async ({ request, params }) => {
   const actor = await requireActor(request);
-  return cardAfter(request, await tasks.changeStatus(actor, params.id!, await readJson(request, tasks.changeStatusSchema)));
+  return cardAfter(actor, await tasks.changeStatus(actor, params.id!, await readJson(request, tasks.changeStatusSchema)));
 });
 
 route("POST", "/api/tasks/:id/cancel", async ({ request, params }) => {
   const actor = await requireActor(request);
-  return cardAfter(request, await tasks.setCancelled(actor, params.id!, true, await readJson(request, tasks.cancelSchema)));
+  return cardAfter(actor, await tasks.setCancelled(actor, params.id!, true, await readJson(request, tasks.cancelSchema)));
 });
 
 route("POST", "/api/tasks/:id/restore", async ({ request, params }) => {
   const actor = await requireActor(request);
-  return cardAfter(request, await tasks.setCancelled(actor, params.id!, false, await readJson(request, tasks.cancelSchema)));
+  return cardAfter(actor, await tasks.setCancelled(actor, params.id!, false, await readJson(request, tasks.cancelSchema)));
 });
 
 route("POST", "/api/tasks/:id/comments", async ({ request, params }) => {
   const actor = await requireActor(request);
-  return cardAfter(request, await tasks.addComment(actor, params.id!, await readJson(request, tasks.commentSchema)));
+  return cardAfter(actor, await tasks.addComment(actor, params.id!, await readJson(request, tasks.commentSchema)));
 });
 
 route("POST", "/api/tasks/:id/attachments", async ({ request, params }) => {
@@ -285,7 +285,7 @@ route("POST", "/api/tasks/:id/attachments", async ({ request, params }) => {
   const file = form.get("file");
   if (!(file instanceof File)) throw new AppError("file_empty", 400);
   await tasks.uploadAttachment(actor, params.id!, file, String(form.get("kind") ?? "file"));
-  return cardAfter(request, { taskId: params.id! });
+  return cardAfter(actor, { taskId: params.id! });
 });
 
 route("GET", "/api/attachments/:id", async ({ request, params }) =>
@@ -300,13 +300,14 @@ route("DELETE", "/api/attachments/:id", async ({ request, params }) =>
 
 route("GET", "/api/notifications", async ({ request }) => {
   const actor = await requireActor(request);
-  const push = await pushKeys();
+  const [push, inbox, prefs, whatsapp, delivery] = await Promise.all([pushKeys(), notify.inbox(actor), loadPrefs(actor.user.id), whapiConfigured(), notify.deliveryHealth(actor)]);
   return json({
-    ...(await notify.inbox(actor)),
-    prefs: await loadPrefs(actor.user.id),
+    ...inbox,
+    delivery,
+    prefs,
     workDays: actor.settings.workDays,
     channels: {
-      whatsapp: { linked: Boolean(actor.user.phoneVerifiedAt), configured: await whapiConfigured() },
+      whatsapp: { linked: Boolean(actor.user.phoneVerifiedAt), configured: whatsapp },
       push: { configured: Boolean(push), vapidPublicKey: push?.publicKey ?? null },
     },
   });
@@ -346,6 +347,24 @@ route("POST", "/api/push/subscribe", async ({ request }) => {
       target: schema.pushSubscriptions.endpoint,
       set: { userId: actor.user.id, sessionId: actor.session.id, p256dh: input.keys.p256dh, auth: input.keys.auth, revokedAt: null },
     });
+  return json({ ok: true });
+});
+
+/** Confirm delivery through the real push gateway for this signed-in device only. */
+route("POST", "/api/push/test", async ({ request }) => {
+  const actor = await requireActor(request);
+  const input = await readJson(request, z.object({ endpoint: z.string().max(1000) }));
+  const sub = await getDb().query.pushSubscriptions.findFirst({ where: and(
+    eq(schema.pushSubscriptions.endpoint, input.endpoint), eq(schema.pushSubscriptions.userId, actor.user.id),
+    eq(schema.pushSubscriptions.sessionId, actor.session.id), isNull(schema.pushSubscriptions.revokedAt),
+  ) });
+  if (!sub) throw new AppError("push_subscription_missing", 400);
+  const vapid = await pushKeys();
+  if (!vapid) throw new AppError("push_unavailable", 503);
+  const result = await sendWebPush(sub, { title: "Уведомления работают", body: "Это тестовое уведомление AI Management.", url: "/notifications", tag: "push-test" },
+    { ...vapid, subject: publicOrigin(request) });
+  if (result.gone) await getDb().update(schema.pushSubscriptions).set({ revokedAt: Date.now() }).where(eq(schema.pushSubscriptions.id, sub.id));
+  if (!result.ok) throw new AppError("push_delivery_failed", 502);
   return json({ ok: true });
 });
 

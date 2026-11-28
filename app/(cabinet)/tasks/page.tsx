@@ -21,7 +21,7 @@ import {
   X,
 } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useOpenTask } from "@/components/tasks/task-panel";
 import { DropdownMenu, Popover } from "radix-ui";
 import * as React from "react";
 import { BranchDialog } from "@/components/cabinet/branch-dialog";
@@ -31,7 +31,7 @@ import { LoadError } from "@/components/forms";
 import { QuickAdd, useAssignees } from "@/components/tasks/create-task-dialog";
 import { DueText, StatusPill, transitionLabel } from "@/components/tasks/labels";
 import { AssigneePicker } from "@/components/tasks/pickers";
-import { applyCard, loadCard, patchItem, prefetchCard, rowKey, useTaskList } from "@/components/tasks/store";
+import { applyCard, loadCard, patchItem, prefetchCard, rowKey, setTaskSaving, taskIsSaving, useTaskList } from "@/components/tasks/store";
 import { StatusDialog } from "@/components/tasks/task-dialogs";
 import type { TaskCard, TaskList, TaskListItem, TransitionInfo } from "@/components/tasks/types";
 import { useTaskAction } from "@/components/tasks/use-task";
@@ -45,6 +45,7 @@ import { api, ApiError } from "@/lib/api";
 import { formatShortDateTime } from "@/lib/format";
 import { useSlashToFocus } from "@/lib/hotkeys";
 import { errorText, t } from "@/lib/i18n";
+import { needsTransitionForm } from "@/lib/task-transition";
 import { newOpId } from "@/lib/op";
 import { cn } from "@/lib/utils";
 
@@ -141,6 +142,7 @@ function useMove() {
 
   const move = React.useCallback(
     async (item: TaskListItem, to: string, statuses: TaskList["statuses"]) => {
+      if (taskIsSaving(item.id)) return;
       const m = item.moves.find((x) => x.to === to);
       if (!m) {
         toast(t("tasks.board.forbidden"), "danger");
@@ -151,18 +153,18 @@ function useMove() {
           const card = await loadCard(item.id);
           const transition = card.transitions.find((tr) => tr.to === to);
           if (!transition) throw new ApiError("transition_forbidden", 403, null);
-          setForm({ card, transition });
+          if (needsTransitionForm(transition.requires, card.attachments.length)) {
+            setForm({ card, transition });
+            return;
+          }
         } catch (e) {
           toast(errorText(e instanceof ApiError ? e.code : "network"), "danger");
+          return;
         }
-        return;
       }
       const target = statuses.find((s) => s.key === to);
-      const before = {
-        status: item.status,
-        moves: item.moves,
-        primary: item.primary,
-      };
+      const before = { ...item };
+      setTaskSaving(item.id, true);
       patchItem(item.id, {
         status: {
           key: to,
@@ -173,13 +175,13 @@ function useMove() {
         primary: null,
         overdue: target?.category === "done" ? false : item.overdue,
       });
-      mark(item.id, "success");
       const opId = opIds.current.get(item.id) ?? newOpId();
       opIds.current.set(item.id, opId);
       try {
         const card = await api<TaskCard>("POST", `/api/tasks/${item.id}/status`, { to, opId, version: item.version });
         opIds.current.delete(item.id);
         applyCard(card, me.user.id);
+        mark(item.id, "success");
         toast(
           t("tasks.moved", {
             title: item.title,
@@ -193,6 +195,8 @@ function useMove() {
         else patchItem(item.id, before);
         mark(item.id, "danger");
         toast(errorText(e instanceof ApiError ? e.code : "network"), "danger");
+      } finally {
+        setTaskSaving(item.id, false);
       }
     },
     [me.user.id, toast],
@@ -251,7 +255,10 @@ export default function TasksPage() {
 
   React.useEffect(() => {
     if (!ready) return;
-    const next = `${window.location.pathname}${urlQuery ? `?${urlQuery}` : ""}`;
+    const params = new URLSearchParams(urlQuery);
+    const task = new URLSearchParams(window.location.search).get("task");
+    if (task) params.set("task", task);
+    const next = `${window.location.pathname}${params.size ? `?${params}` : ""}`;
     if (next !== `${window.location.pathname}${window.location.search}`) window.history.replaceState(window.history.state, "", next);
   }, [urlQuery, ready]);
 
@@ -770,7 +777,7 @@ function QuickAction({ item, statuses, move }: { item: TaskListItem; statuses: T
   const m = item.primary ? item.moves.find((x) => x.to === item.primary) : undefined;
   const cat = item.cancelled ? "cancelled" : item.status.category;
   // Выполненную задачу кнопка не «переоткрывает» случайно — это делается в карточке.
-  if (!m || item.id.startsWith("new-") || cat === "done") {
+  if (!m || item.saving || item.id.startsWith("new-") || cat === "done") {
     return (
       <span
         key={cat}
@@ -869,12 +876,12 @@ function TaskTable({
     <Card className="overflow-hidden">
       <ul className="divide-y divide-border">
         {data.items.map((task, i) => {
-          const pending = task.id.startsWith("new-");
+          const pending = task.id.startsWith("new-") || Boolean(task.saving);
           const href = pending ? undefined : `/tasks/${task.id}`;
           return (
             <li
               key={rowKey(task.id)}
-              className={cn(pending ? "slide-in" : "rise-in", flash[task.id] && "flash")}
+              className={cn(task.id.startsWith("new-") && "slide-in", flash[task.id] && "flash")}
               style={
                 {
                   "--i": Math.min(i, 8),
@@ -886,13 +893,14 @@ function TaskTable({
                 className={cn(
                   "group relative flex items-center gap-3 px-3 py-2.5 transition-colors hover:bg-muted/50 sm:px-4",
                   task.cancelled && "opacity-60",
-                  pending && "opacity-70",
+                  pending && "task-saving opacity-70",
                 )}
               >
                 <QuickAction item={task} statuses={data.statuses} move={move} />
                 {href ? (
                   <Link
                     href={href}
+                    prefetch={false}
                     onClick={onOpen}
                     onMouseEnter={() => prefetchCard(task.id)}
                     onFocus={() => prefetchCard(task.id)}
@@ -972,7 +980,7 @@ function Board({
   const allowed = (task: TaskListItem | null, key: string) => Boolean(task?.moves.some((m) => m.to === key));
 
   return (
-    <div className="-mx-4 overflow-x-auto px-4 pb-2 sm:-mx-6 sm:px-6">
+    <div className="-mx-4 overflow-x-auto px-4 py-1 sm:-mx-6 sm:px-6">
       <div
         className="grid min-w-[880px] items-start gap-3"
         style={{
@@ -1005,9 +1013,9 @@ function Board({
               }}
               className={cn(
                 "min-w-0 rounded-xl border border-border bg-muted/70 p-2.5 transition-[background-color,opacity,box-shadow,transform] duration-200",
-                dragging && canDrop && "bg-selected/70 ring-2 ring-primary/60",
+                dragging && canDrop && "bg-selected/70 task-drop-target",
                 dragging && !canDrop && !isSource && "opacity-45",
-                over === s.key && canDrop && "scale-[1.01] ring-primary",
+                over === s.key && canDrop && "task-drop-over",
               )}
             >
               <h2 className="flex items-center gap-2 px-1.5 pb-2.5 pt-1 text-[15px] font-bold">
@@ -1019,7 +1027,7 @@ function Board({
               </h2>
               <ul className="grid grid-cols-[minmax(0,1fr)] gap-2">
                 {col.map((task) => (
-                  <li key={rowKey(task.id)} className={cn("card-in rounded-xl", flash[task.id] && "flash")}>
+                  <li key={rowKey(task.id)} className={cn("rounded-xl", flash[task.id] && "flash")}>
                     <BoardCard
                       task={task}
                       data={data}
@@ -1064,8 +1072,8 @@ function BoardCard({
   onDragStart: () => void;
   onDragEnd: () => void;
 }) {
-  const router = useRouter();
-  const pending = task.id.startsWith("new-");
+  const openTask = useOpenTask();
+  const pending = task.id.startsWith("new-") || Boolean(task.saving);
   return (
     <div
       draggable={task.moves.length > 0 && !pending}
@@ -1077,10 +1085,10 @@ function BoardCard({
       onDragEnd={onDragEnd}
       onMouseEnter={() => !pending && prefetchCard(task.id)}
       className={cn(
-        "relative rounded-xl border border-border bg-surface p-3.5 shadow-[0_1px_2px_rgba(16,24,40,0.06)] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md",
+        "relative rounded-xl border border-border bg-surface p-3.5 shadow-[0_1px_2px_rgba(16,24,40,0.06)] transition-[background-color,box-shadow,opacity] duration-150 hover:shadow-md",
         task.moves.length > 0 && "cursor-grab active:cursor-grabbing",
-        dragging && "rotate-1 opacity-50 ring-2 ring-primary",
-        pending && "opacity-70",
+        dragging && "opacity-40 shadow-[inset_0_0_0_2px_var(--am-accent)]",
+        pending && "task-saving opacity-70",
       )}
     >
       <div className="flex items-start gap-2">
@@ -1089,6 +1097,7 @@ function BoardCard({
         ) : (
           <Link
             href={`/tasks/${task.id}`}
+            prefetch={false}
             onClick={onOpen}
             draggable={false}
             className="min-w-0 flex-1 font-bold leading-snug break-anywhere after:absolute after:inset-0"
@@ -1109,7 +1118,7 @@ function BoardCard({
                 <DropdownMenu.Item
                   onSelect={() => {
                     onOpen();
-                    router.push(`/tasks/${task.id}`);
+                    openTask(task.id);
                   }}
                   className="cursor-pointer rounded-lg px-2.5 py-2 text-sm font-semibold outline-none data-[highlighted]:bg-muted"
                 >

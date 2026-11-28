@@ -4,26 +4,8 @@ import type { LucideIcon } from "lucide-react";
 import * as React from "react";
 import { cn } from "@/lib/utils";
 
-/** Плавный счётчик для чисел сводки (без анимации при reduce-motion). */
-export function useCountUp(target: number) {
-  const [value, setValue] = React.useState(0);
-  React.useEffect(() => {
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      const frame = requestAnimationFrame(() => setValue(target));
-      return () => cancelAnimationFrame(frame);
-    }
-    const start = performance.now();
-    let frame = 0;
-    const tick = (time: number) => {
-      const progress = Math.min(1, (time - start) / 450);
-      setValue(Math.round(target * (1 - Math.pow(1 - progress, 3))));
-      if (progress < 1) frame = requestAnimationFrame(tick);
-    };
-    frame = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(frame);
-  }, [target]);
-  return value;
-}
+/** Counts update immediately; no animation restart after every saved action. */
+export function useCountUp(target: number) { return target; }
 
 const TONES = {
   primary: "bg-primary/10 text-primary",
