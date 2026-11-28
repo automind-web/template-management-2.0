@@ -89,7 +89,7 @@ export function AttachButtons({ taskId, onUploaded }: { taskId: string; onUpload
   );
 }
 
-/** Форма перехода, если нужен результат или комментарий. Та же форма — из меню карточки и канбана. */
+/** Только обязательные поля перехода. Та же форма — из карточки, меню и канбана. */
 export function StatusDialog({
   card,
   transition,
@@ -116,7 +116,11 @@ export function StatusDialog({
       const next = await act(
         "POST",
         `/api/tasks/${card.task.id}/status`,
-        { to: transition.to, result: result || null, comment: comment || null },
+        {
+          to: transition.to,
+          result: transition.requires.resultText ? result || null : null,
+          comment: transition.requires.comment ? comment || null : null,
+        },
         card.task.version,
       );
       setResult("");
@@ -164,35 +168,37 @@ export function StatusDialog({
           }}
         >
           {error ? <Alert tone="danger">{error}</Alert> : null}
-          {transition.requires.result ? (
-            <>
-              <Field label={t("tasks.statusForm.result")} hint={t("tasks.statusForm.resultHint")} error={fieldErrors.result}>
-                <Textarea value={result} onChange={(e) => setResult(e.target.value)} rows={4} required={transition.requires.resultText} autoFocus />
-              </Field>
-              <div className="flex flex-col gap-2">
-                {needsFile ? <p className="text-sm text-danger">{t("tasks.statusForm.attachmentRequired")}</p> : null}
-                {card.attachments.length ? (
-                  <ul className="flex flex-col gap-1 text-sm text-muted-foreground">
-                    {card.attachments.map((a) => (
-                      <li key={a.id} className="truncate">
-                        {a.fileName}
-                      </li>
-                    ))}
-                  </ul>
-                ) : null}
-                <AttachButtons taskId={card.task.id} onUploaded={setCard} />
-              </div>
-            </>
+          {transition.requires.resultText ? (
+            <Field label={t("tasks.statusForm.result")} hint={t("tasks.statusForm.resultHint")} error={fieldErrors.result}>
+              <Textarea value={result} onChange={(e) => setResult(e.target.value)} rows={4} required autoFocus />
+            </Field>
           ) : null}
-          <Field label={transition.requires.comment ? t("tasks.statusForm.commentRequired") : t("tasks.statusForm.comment")} error={fieldErrors.comment}>
-            <Textarea
-              value={comment}
-              onChange={(e) => setComment(e.target.value)}
-              rows={3}
-              required={transition.requires.comment}
-              autoFocus={!transition.requires.result}
-            />
-          </Field>
+          {transition.requires.attachment ? (
+            <div className="flex flex-col gap-2">
+              {needsFile ? <p className="text-sm text-danger">{t("tasks.statusForm.attachmentRequired")}</p> : null}
+              {card.attachments.length ? (
+                <ul className="flex flex-col gap-1 text-sm text-muted-foreground">
+                  {card.attachments.map((a) => (
+                    <li key={a.id} className="truncate">
+                      {a.fileName}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+              <AttachButtons taskId={card.task.id} onUploaded={setCard} />
+            </div>
+          ) : null}
+          {transition.requires.comment ? (
+            <Field label={t("tasks.statusForm.commentRequired")} error={fieldErrors.comment}>
+              <Textarea
+                value={comment}
+                onChange={(e) => setComment(e.target.value)}
+                rows={3}
+                required
+                autoFocus={!transition.requires.resultText}
+              />
+            </Field>
+          ) : null}
         </form>
       </DialogContent>
     </Dialog>

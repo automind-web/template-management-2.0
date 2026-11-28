@@ -68,7 +68,6 @@ const EMPTY: Filters = {
 const SCROLL_KEY = "am.tasks.scroll";
 const CANCELLED = "_cancelled";
 const DUE_KEYS = ["overdue", "today", "week", "has", "none"] as const;
-type MoveOrigin = "action" | "drag";
 
 function readFilters(): Filters {
   if (typeof window === "undefined") return EMPTY;
@@ -120,8 +119,8 @@ function downloadCsv(data: TaskList) {
 
 /**
  * Смена статуса из списка или доски: строка меняется сразу, сервер подтверждает в фоне.
- * Перетаскивание меняет только статус и никогда не открывает форму.
- * Явная кнопка действия может запросить результат или комментарий.
+ * Форма открывается только для незаполненных обязательных полей перехода.
+ * Для перетаскивания и явных кнопок действий действует одно правило.
  */
 function useMove() {
   const { me } = useCabinet();
@@ -143,14 +142,14 @@ function useMove() {
   };
 
   const move = React.useCallback(
-    async (item: TaskListItem, to: string, statuses: TaskList["statuses"], origin: MoveOrigin = "action") => {
+    async (item: TaskListItem, to: string, statuses: TaskList["statuses"]) => {
       if (taskIsSaving(item.id)) return;
       const m = item.moves.find((x) => x.to === to);
       if (!m) {
         toast(t("tasks.board.forbidden"), "danger");
         return;
       }
-      if (m.needsForm && origin !== "drag") {
+      if (m.needsForm) {
         try {
           const card = await loadCard(item.id);
           const transition = card.transitions.find((tr) => tr.to === to);
@@ -195,15 +194,23 @@ function useMove() {
         const current = e instanceof ApiError ? (e.details as { current?: TaskCard } | null)?.current : null;
         if (current) applyCard(current, me.user.id);
         else patchItem(item.id, before);
-        mark(item.id, "danger");
         const code = e instanceof ApiError ? e.code : "network";
-        const needsDetails = ["comment_required", "result_required", "attachment_required"].includes(code);
-        toast(
-          origin === "drag" && needsDetails
-            ? t("tasks.board.completeInCard", { reason: errorText(code) })
-            : errorText(code),
-          "danger",
-        );
+        // Требования могли измениться после загрузки доски: сверяем их с сервером.
+        if (["comment_required", "result_required", "attachment_required"].includes(code)) {
+          try {
+            const card = await api<TaskCard>("GET", `/api/tasks/${item.id}`);
+            applyCard(card, me.user.id);
+            const transition = card.transitions.find((tr) => tr.to === to);
+            if (transition && needsTransitionForm(transition.requires, card.attachments.length)) {
+              setForm({ card, transition });
+              return;
+            }
+          } catch {
+            // Если обновление не удалось, показываем исходную ошибку переноса.
+          }
+        }
+        mark(item.id, "danger");
+        toast(errorText(code), "danger");
       } finally {
         setTaskSaving(item.id, false);
       }
@@ -350,7 +357,7 @@ export default function TasksPage() {
   const view = data?.view ?? (filters.view || "mine");
   const board = filters.layout === "board";
   const statuses = data?.statuses ?? me.statuses;
-  const move = (item: TaskListItem, to: string, origin: MoveOrigin = "action") => void mover.move(item, to, statuses, origin);
+  const move = (item: TaskListItem, to: string) => void mover.move(item, to, statuses);
 
   return (
     <>
@@ -980,7 +987,7 @@ function Board({
 }: {
   data: TaskList;
   onOpen: () => void;
-  move: (item: TaskListItem, to: string, origin?: MoveOrigin) => void;
+  move: (item: TaskListItem, to: string) => void;
   flash: Record<string, "success" | "danger">;
 }) {
   const items = data.items.filter((i) => !i.cancelled);
@@ -1018,7 +1025,7 @@ function Board({
                 const task = dragging;
                 setDragging(null);
                 setOver(null);
-                if (task && task.status.key !== s.key) move(task, s.key, "drag");
+                if (task && task.status.key !== s.key) move(task, s.key);
               }}
               className={cn(
                 "min-w-0 rounded-xl border border-border bg-muted/70 p-2.5 transition-[background-color,opacity,box-shadow,transform] duration-200",

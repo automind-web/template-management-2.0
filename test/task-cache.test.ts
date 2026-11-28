@@ -38,7 +38,8 @@ test("Tasks being created are not lost when an older list response arrives", () 
 });
 
 test("Optional reports do not open a dialog; required text, comments, and missing files do", () => {
-  const optional = { comment: false, resultText: false, attachment: false };
+  // A submission transition may offer a result without making it mandatory.
+  const optional = { result: true, comment: false, resultText: false, attachment: false };
   assert.equal(needsTransitionForm(optional, 0), false);
   assert.equal(needsTransitionForm({ ...optional, resultText: true }, 1), true);
   assert.equal(needsTransitionForm({ ...optional, comment: true }, 1), true);
